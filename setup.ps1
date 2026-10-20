@@ -186,7 +186,7 @@ Write-Host "[OK] settings.json updated successfully (UTF-8 no BOM)."
 #    The block is wrapped in agy-bridge markers so re-running upgrades it in place.
 $ClaudeMd = Join-Path $CurrentDir "CLAUDE.md"
 $RuleContent = @"
-<!-- agy-bridge:start v3 -->
+<!-- agy-bridge:start v4 -->
 ## Delegating Tasks to Antigravity (agy)
 
 Suitable for delegation: batch multi-file edits, writing unit tests, repo-wide searches, code reviews.
@@ -206,6 +206,15 @@ Never hardcode deprecated model IDs. Select the model dynamically based on task 
   - Action: Run ``agy models`` to inspect available models, pick a flagship high-reasoning model (e.g., IDs matching ``argon-high``, ``opus-.*-high``, or ``sonnet-.*-high``), and pass ``--model <MODEL_ID>``.
   - Note: Cache the output of ``agy models`` in your context for the rest of the session; do not run it repeatedly.
 
+### 1b. Quota-Aware Model Choice
+Quota groups can change, so never hardcode which models share a quota. Read it from ``agy`` instead.
+
+- Before a Tier 2 or Tier 3 task, and after any quota error, run ``agy -p "/usage" --output-format json --print-timeout 60s``. It returns instantly and uses no tokens, so it needs no git check and no ``timeout`` or ``run_in_background``.
+- In ``command.data.groups[]``, each group has a ``name``, a ``description`` (often "Models within this group: ..."), and ``buckets[]``. Each bucket has a ``window`` (``5h`` or ``weekly``), ``remaining_fraction`` (0 to 1) and ``reset_time`` (UTC). Models in the same group share the same limits.
+- Match a model from ``agy models`` to its group by display name: the group ``name`` or one of the model families listed in its ``description`` appears in the model's display name (e.g. "Claude Opus 5.5 (High)" matches a group listing "Claude Opus"). If nothing matches, the quota is unknown: just try the model.
+- A group is **exhausted** when any of its buckets has ``remaining_fraction`` 0. It is usable again at the latest ``reset_time`` among its exhausted buckets, and the bucket's ``window`` tells you whether it was the 5-hour or the weekly limit.
+- Choose the model from a group that is not exhausted. If the group of the model you wanted is exhausted, pick a model of the **same tier** from another group (the tier is the task's tier from section 1, not the suffix of the model that failed; Tier 1: a lightweight ``flash`` / ``low`` model; Tier 2: a ``medium`` model; Tier 3: a ``high`` model), and tell the user which model you used and why. If the default model of Tier 1 belongs to an exhausted group, pass ``--model`` with a lightweight model from another group.
+
 ### 2. Execution & Safety Rules
 1. Before calling ``agy``, pick the check by task type. Git is optional; never assume the project uses it.
    - **Read-only task** (listing, searching, summarizing): never block on repo state. Forbid writes in the prompt, and afterwards confirm nothing changed (``git status`` if the project uses git, otherwise compare the file list).
@@ -222,8 +231,10 @@ Never hardcode deprecated model IDs. Select the model dynamically based on task 
    - If a Bash call times out anyway, check for a live ``agy`` process and review ``git status`` before doing anything else. Never start a second ``agy`` run on the same tree while one is running.
 4. **Error & Quota Fallback (CRITICAL):**
    - Only adopt ``response`` when JSON ``status`` is ``SUCCESS`` **and** ``response`` is non-empty. An empty ``response``, a non-empty ``denied_actions``, or a ``no output produced — a tool required the "..." permission`` message in ``stderr`` means the task was soft-denied: treat it as a failure, do not adopt it, and tell the user which rule (e.g. ``command(...)`` or ``write_file(...)``) needs to be added to ``permissions.allow``.
-   - If ``stderr`` indicates a "Quota Exceeded", "429 Too Many Requests", or soft-denied command error:
-     **DO NOT** automatically fallback to executing the large batch task yourself. You MUST stop immediately, report the exact error to the user, and ask for their explicit decision on how to proceed (e.g., wait for quota refresh, or proceed using Claude's own quota).
+   - **Quota exhaustion** is a "Quota Exceeded", "429", "RESOURCE_EXHAUSTED", "quota reached", "usage limit" or "rate limit" message in ``stderr``, ``response`` or ``error`` (JSON ``status`` ``ERROR``), or a group with ``remaining_fraction`` 0 in ``/usage`` (section 1b). Run ``/usage`` to see which group is exhausted; do not guess from the error text.
+   - **Switching models is allowed** because it only uses ``agy`` quota, not Claude's. If the failed run left the tree unchanged (compare ``git status --short`` or the file list with how it looked just before the call; files that already existed then, such as ``TASK.md`` or an untracked ``CLAUDE.md``, do not count), retry the same task **once** with a same-tier model from a group that is not exhausted, and tell the user which model was used instead and why. If the failed run changed files, stop and ask the user instead of retrying. Do not send more work to an exhausted group for the rest of the session.
+   - If **every group** is exhausted, or the retry fails: stop immediately and report, for each group, its name, which limit it hit (5-hour or weekly), ``remaining_fraction`` and ``reset_time`` (convert to the user's local time). **DO NOT** automatically fall back to executing the large batch task yourself; ask for the user's explicit decision (wait for the quota to refresh, or proceed using Claude's own quota).
+   - Timeouts and soft-denials are not quota errors: never switch models for them.
 5. To continue an existing session, pass ``--conversation <conversation_id>``.
 6. After completion, review the changes (``git diff`` if the project uses git, otherwise compare against the backup or file list) and execute tests.
 7. Never ask ``agy`` to read or write ``.env``, private keys, or ``.git/``.

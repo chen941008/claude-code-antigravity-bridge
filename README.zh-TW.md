@@ -30,40 +30,40 @@ Google 官方 CLI 本身就支援無頭模式，Claude Code 可以直接用 Bash
 
 ### 步驟 1：執行自動設定腳本
 
-#### 方式 A：遠端一鍵執行（固定在 `v1.2.0` 版，完全不需預先修改系統執行權限）
+#### 方式 A：遠端一鍵執行（固定在 `v1.3.0` 版，完全不需預先修改系統執行權限）
 
 **macOS / Linux / WSL：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.sh | bash
 ```
 
 **Windows (PowerShell)：**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > 把遠端腳本直接 pipe 給 shell 執行，等於用你的權限跑別人的程式碼。本教學的初衷就是避開未經審查的程式碼，建議先閱讀腳本內容（或改用方式 B）。另外 `setup.sh` 需要 `python3` 來合併 `settings.json`。
 
-上面的網址指向固定標籤 `v1.2.0`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
+上面的網址指向固定標籤 `v1.3.0`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
 
-| 檔案 | SHA-256（`v1.2.0`） |
+| 檔案 | SHA-256（`v1.3.0`） |
 | --- | --- |
-| `setup.sh` | `f9ccc614e9f4ca0104a13682442295c606cbaa0ea98ee44c0beaf3a6e8393641` |
-| `setup.ps1` | `f606fe5a58551014e147c30bfd54e44d302570b77de51258cb41262aa6288a22` |
+| `setup.sh` | `69af1347a6c4eb5d7174c17d0b9d279e0e9de990d1b0e103491343028e8a74c5` |
+| `setup.ps1` | `43a9b5cfef519a0480acde37524b1c540364068c0fe440dac6b39ba8c6f885b4` |
 
 ```bash
 # macOS / Linux / WSL
-curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.sh
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.sh
 sha256sum setup.sh        # macOS 用：shasum -a 256 setup.sh
 bash setup.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.ps1 -OutFile setup.ps1
 (Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
@@ -199,7 +199,7 @@ _規則是以指令「前綴」比對：`"command(jq)"` 也會放行 `jq .name p
 
 ### Q1: 如果我的專案原本就已經有自己的 `CLAUDE.md`，執行自動設定腳本會把它覆蓋掉嗎？
 
-**完全不會。** 腳本採用「無損附加（Append）」的設計。如果它偵測到你已有 `CLAUDE.md`，它只會將外包規則安靜地加在文件最底端，絕不會更動你原有的程式碼規範。規則放在以 `<!-- agy-bridge:start v3 -->` / `<!-- agy-bridge:end -->` 標記包住的區塊裡，所以重複執行只會替換這個區塊，不會產生重複內容，也不會動到其他部分。
+**完全不會。** 腳本採用「無損附加（Append）」的設計。如果它偵測到你已有 `CLAUDE.md`，它只會將外包規則安靜地加在文件最底端，絕不會更動你原有的程式碼規範。規則放在以 `<!-- agy-bridge:start v4 -->` / `<!-- agy-bridge:end -->` 標記包住的區塊裡，所以重複執行只會替換這個區塊，不會產生重複內容，也不會動到其他部分。
 
 ### Q2: Claude Code 如何決定要開哪個 `agy` 模型？未來模型改名或淘汰會不會壞掉？
 
@@ -210,7 +210,7 @@ _規則是以指令「前綴」比對：`"command(jq)"` 也會放行 `jq .name p
 
 ### Q3: 如果 Antigravity (agy) 的額度耗盡，Claude Code 會擅自消耗自己的額度來完成工作嗎？
 
-**不會。** `CLAUDE.md` 設有嚴格的**「額度守門員（Quota Fallback）」**規則。當 Claude 偵測到 `agy` 回傳額度不足（Quota Exceeded）、速率限制（429）或指令被拒絕時，被明令**禁止**擅自接手批次工作。它會立即停下來向你報告錯誤，並詢問你的決定（要等待額度重置，還是授權消耗 Claude 自身額度繼續）。
+**不會。** `CLAUDE.md` 設有嚴格的**「額度守門員（Quota Fallback）」**規則。當 Claude 偵測到 `agy` 回傳額度不足（Quota Exceeded）、速率限制（429）或指令被拒絕時，會先執行 `agy -p "/usage"`（瞬間完成、不耗 token）讀取額度分組。每個分組會列出共用額度的模型，並有 5 小時與每週兩個額度，所以 Claude 能確切知道撞到哪一種額度、何時重置。分組一律從 `agy` 讀取、不寫死，Google 調整分組後仍然適用。若失敗的那次執行沒有改動任何檔案，Claude 會改用仍有額度的分組中同等級的模型重試一次。所有分組都耗盡時，被明令**禁止**擅自接手批次工作：它會立即停下來，回報每個分組的額度與重置時間，並詢問你的決定（要等待額度重置，還是授權消耗 Claude 自身額度繼續）。
 
 ### Q4: 遇到了 macOS 跳出「資料取用已封鎖」或 Windows 出現 `\ufeff` 報錯怎麼辦？
 

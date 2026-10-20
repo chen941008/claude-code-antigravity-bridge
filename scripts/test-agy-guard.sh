@@ -33,5 +33,7 @@ expect 0 "agy-ish word not caught"       '{"tool_name":"Bash","tool_input":{"com
 expect 0 "; inside quoted prompt not split" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"Fix A; then fix B\\\" $JT\",\"timeout\":600000}}"
 expect 0 "| and && inside single quotes not split" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p 'a | b && c' $JT\",\"timeout\":600000}}"
 expect 2 "real ; after quoted prompt still split" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"x; y\\\" $JT; agy -p hi\",\"timeout\":600000}}"
+expect 0 "/usage query is exempt" '{"tool_name":"Bash","tool_input":{"command":"agy -p \"/usage\" --output-format json"}}'
+expect 2 "prompt merely mentioning /usage is not exempt" '{"tool_name":"Bash","tool_input":{"command":"agy -p \"explain /usage\" --output-format json"}}'
 
 exit $fail

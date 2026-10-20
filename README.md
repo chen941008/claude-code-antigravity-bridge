@@ -30,40 +30,40 @@ Run the setup script inside your **project root directory** to automatically ins
 
 ### Step 1: Run the Setup Script
 
-#### Option A: Remote One-Liner, pinned to `v1.2.0` (No system permission changes required)
+#### Option A: Remote One-Liner, pinned to `v1.3.0` (No system permission changes required)
 
 **macOS / Linux / WSL:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > Piping a remote script into your shell runs it with your privileges. Since this guide exists to avoid unaudited code, read the script first (or use Option B), and note that `setup.sh` requires `python3` to merge `settings.json`.
 
-The URLs above point at the fixed tag `v1.2.0`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
+The URLs above point at the fixed tag `v1.3.0`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
 
-| File | SHA-256 (`v1.2.0`) |
+| File | SHA-256 (`v1.3.0`) |
 | --- | --- |
-| `setup.sh` | `f9ccc614e9f4ca0104a13682442295c606cbaa0ea98ee44c0beaf3a6e8393641` |
-| `setup.ps1` | `f606fe5a58551014e147c30bfd54e44d302570b77de51258cb41262aa6288a22` |
+| `setup.sh` | `69af1347a6c4eb5d7174c17d0b9d279e0e9de990d1b0e103491343028e8a74c5` |
+| `setup.ps1` | `43a9b5cfef519a0480acde37524b1c540364068c0fe440dac6b39ba8c6f885b4` |
 
 ```bash
 # macOS / Linux / WSL
-curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.sh
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.sh
 sha256sum setup.sh        # macOS: shasum -a 256 setup.sh
 bash setup.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.ps1 -OutFile setup.ps1
 (Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
@@ -199,7 +199,7 @@ _Rules are matched as command prefixes: `"command(jq)"` also allows `jq .name pa
 
 ### Q1: I already have project-specific instructions in my `CLAUDE.md`. Will the setup script overwrite them?
 
-**No.** The script uses a non-destructive append approach. If `CLAUDE.md` already exists, it simply appends the Antigravity delegation rules to the bottom of the file, leaving your existing instructions intact. The rules live in a block wrapped in `<!-- agy-bridge:start v3 -->` / `<!-- agy-bridge:end -->` markers, so re-running the script replaces only that block and never duplicates it or touches anything else.
+**No.** The script uses a non-destructive append approach. If `CLAUDE.md` already exists, it simply appends the Antigravity delegation rules to the bottom of the file, leaving your existing instructions intact. The rules live in a block wrapped in `<!-- agy-bridge:start v4 -->` / `<!-- agy-bridge:end -->` markers, so re-running the script replaces only that block and never duplicates it or touches anything else.
 
 ### Q2: How does Claude Code choose which `agy` model to use without wasting quota or breaking when models update?
 
@@ -210,7 +210,7 @@ Our `CLAUDE.md` rules implement **Dynamic Model Tiering**:
 
 ### Q3: What happens if Antigravity's quota runs out? Will Claude Code silently drain its own quota to finish the batch job?
 
-**No.** `CLAUDE.md` includes a strict **Quota Fallback Guardrail**. When Claude detects a "Quota Exceeded", "429 Too Many Requests", or soft-denied command error in `agy`'s output, it is strictly forbidden from taking over the batch task automatically. It will halt execution, report the exact error, and ask for your explicit decision.
+**No.** `CLAUDE.md` includes a strict **Quota Fallback Guardrail**. When Claude detects a "Quota Exceeded", "429 Too Many Requests", or soft-denied command error in `agy`'s output, it runs `agy -p "/usage"` (instant, zero tokens) to read the quota groups. Each group lists which models share its limits and has a 5-hour and a weekly bucket, so Claude knows exactly which limit was hit and when it resets. Groups are read from `agy`, never hardcoded, so it keeps working when Google changes them. If the failed run changed no files, Claude retries once with a same-tier model from a group that still has quota. If every group is exhausted, it is strictly forbidden from taking over the batch task automatically: it halts, reports each group's limit and reset time, and asks for your explicit decision.
 
 ### Q4: I'm getting a macOS "Data Access Blocked" popup or a Windows `\ufeff` BOM error. What do I do?
 

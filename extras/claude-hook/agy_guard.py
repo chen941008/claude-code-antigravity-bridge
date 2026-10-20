@@ -9,6 +9,8 @@ Blocks a Bash tool call that runs headless agy (`agy -p` / `--print` / `--prompt
   4. another headless agy run from the same project directory is still alive (e.g. orphaned
      by an earlier timeout); runs started elsewhere are ignored when their cwd can be read
 
+The instant `agy -p "/usage"` quota query is exempt (it runs no model).
+
 Blocking = exit code 2 with the reason on stderr; Claude Code shows that reason to Claude.
 Everything else passes through (exit 0). Any unexpected input also passes through, so a
 bug here can never lock you out of the Bash tool.
@@ -30,6 +32,7 @@ PRINT_FLAG = re.compile(r"\s(?:-p|--print|--prompt)(?=\s|=|$)")
 JSON_FLAG = re.compile(r"\s--output-format(?:=|\s+)[\"']?json[\"']?(?=\s|$)")
 PRINT_TIMEOUT_FLAG = re.compile(r"\s--print-timeout(?:=|\s+)\S+")
 # Quoted strings are skipped so a prompt like "fix A; then B" is not split in the middle.
+USAGE_QUERY = re.compile(r"""\s(?:-p|--print|--prompt)(?:=|\s+)["']?/usage["']?(?=\s|$)""")
 SEGMENT_SPLIT = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|(&&|\|\||[;|\n])""", re.DOTALL)
 
 
@@ -44,7 +47,7 @@ def split_shell_segments(command):
 
 
 def headless_agy_segments(command):
-    return [s for s in split_shell_segments(command) if AGY_CMD.search(s) and PRINT_FLAG.search(s)]
+    return [s for s in split_shell_segments(command) if AGY_CMD.search(s) and PRINT_FLAG.search(s) and not USAGE_QUERY.search(s)]
 
 
 def process_cwd(pid):
