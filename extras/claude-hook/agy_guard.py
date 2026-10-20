@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Optional Claude Code PreToolUse hook that hard-enforces the agy-bridge rules a prompt can't.
+
+Blocks a Bash tool call that runs headless agy (`agy -p` / `--print` / `--prompt`) when:
+  1. `--output-format json` is missing (Claude can't check status / denied_actions otherwise)
+  2. it is neither `run_in_background` nor given a Bash `timeout` >= 600000 ms
+  3. it runs in the foreground without `--print-timeout` (Claude Code does not kill a
+     timed-out command, so agy must stop itself; verified with scripts/probe-bash-timeout.sh)
+  4. another headless agy run is still alive (e.g. orphaned by an earlier timeout)
+
+Blocking = exit code 2 with the reason on stderr; Claude Code shows that reason to Claude.
+Everything else passes through (exit 0). Any unexpected input also passes through, so a
+bug here can never lock you out of the Bash tool.
+
+The dirty-worktree check is intentionally NOT enforced: read-only delegations are allowed
+on a dirty tree (CLAUDE.md rule 1), and a hook can't tell read-only from write tasks.
+"""
+import json
+import re
+import shutil
+import subprocess
+import sys
+
+MIN_TIMEOUT_MS = 600000
+
+AGY_CMD = re.compile(r"(?:^|[\s/(`])agy(?:\.exe)?(?=\s)")
+PRINT_FLAG = re.compile(r"\s(?:-p|--print|--prompt)(?=\s|=|$)")
+JSON_FLAG = re.compile(r"\s--output-format(?:=|\s+)[\"']?json[\"']?(?=\s|$)")
+PRINT_TIMEOUT_FLAG = re.compile(r"\s--print-timeout(?:=|\s+)\S+")
+SEGMENT_SPLIT = re.compile(r"&&|\|\||[;|\n]")
+
+
+def headless_agy_segments(command):
+    return [s for s in SEGMENT_SPLIT.split(command) if AGY_CMD.search(s) and PRINT_FLAG.search(s)]
+
+
+def agy_already_running():
+    if not shutil.which("pgrep"):
+        return False  # Windows / minimal images: skip rather than guess
+    # The hook runs before the new command starts, so any match is a previous run.
+    pattern = r"(^|/)agy(\.exe)? .*(-p|--print|--prompt)( |=|$)"
+    return subprocess.run(["pgrep", "-f", pattern], stdout=subprocess.DEVNULL).returncode == 0
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except Exception:
+        return 0
+    if event.get("tool_name") != "Bash":
+        return 0
+    tool_input = event.get("tool_input") or {}
+    segments = headless_agy_segments(tool_input.get("command") or "")
+    if not segments:
+        return 0
+
+    problems = []
+    if not all(JSON_FLAG.search(s) for s in segments):
+        problems.append("add `--output-format json` so status, response and denied_actions can be checked")
+    background = tool_input.get("run_in_background") is True
+    try:
+        timeout = int(tool_input.get("timeout") or 0)
+    except (TypeError, ValueError):
+        timeout = 0
+    if not background and timeout < MIN_TIMEOUT_MS:
+        problems.append(
+            f"set the Bash tool `timeout` to {MIN_TIMEOUT_MS} or use `run_in_background: true` "
+            "(agy prints nothing until it finishes)"
+        )
+    if not background and not all(PRINT_TIMEOUT_FLAG.search(s) for s in segments):
+        problems.append(
+            "add `--print-timeout 540s` so agy stops itself before the Bash tool times out "
+            "(Claude Code leaves a timed-out command running)"
+        )
+    if agy_already_running():
+        problems.append(
+            "another headless agy run is still alive (maybe orphaned by a timeout); "
+            "wait for it or ask the user, and check `git status` before retrying"
+        )
+
+    if problems:
+        sys.stderr.write("agy-guard blocked this call:\n- " + "\n- ".join(problems) + "\n")
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

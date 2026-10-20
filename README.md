@@ -199,7 +199,7 @@ _Rules are matched as command prefixes: `"command(jq)"` also allows `jq .name pa
 
 ### Q1: I already have project-specific instructions in my `CLAUDE.md`. Will the setup script overwrite them?
 
-**No.** The script uses a non-destructive append approach. If `CLAUDE.md` already exists, it simply appends the Antigravity delegation rules to the bottom of the file, leaving your existing instructions intact. The rules live in a block wrapped in `<!-- agy-bridge:start v2 -->` / `<!-- agy-bridge:end -->` markers, so re-running the script replaces only that block and never duplicates it or touches anything else.
+**No.** The script uses a non-destructive append approach. If `CLAUDE.md` already exists, it simply appends the Antigravity delegation rules to the bottom of the file, leaving your existing instructions intact. The rules live in a block wrapped in `<!-- agy-bridge:start v3 -->` / `<!-- agy-bridge:end -->` markers, so re-running the script replaces only that block and never duplicates it or touches anything else.
 
 ### Q2: How does Claude Code choose which `agy` model to use without wasting quota or breaking when models update?
 

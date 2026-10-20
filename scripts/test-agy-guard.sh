@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Offline unit test for extras/claude-hook/agy_guard.py (no Claude, no agy, no quota).
+set -uo pipefail
+cd "$(dirname "$0")/.."
+HOOK=extras/claude-hook/agy_guard.py
+fail=0
+
+# expect <exit code> <description> <json event>
+expect() {
+    local want=$1 desc=$2 event=$3 got
+    printf '%s' "$event" | python3 "$HOOK" 2>/dev/null
+    got=$?
+    if [ "$got" = "$want" ]; then echo "ok   $desc"; else echo "FAIL $desc (want $want, got $got)"; fail=1; fi
+}
+
+J='--output-format json'
+JT='--output-format json --print-timeout 540s'
+expect 0 "non-Bash tool passes"          '{"tool_name":"Read","tool_input":{"file_path":"x"}}'
+expect 0 "unrelated bash passes"         '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
+expect 0 "agy models passes"             '{"tool_name":"Bash","tool_input":{"command":"agy models"}}'
+expect 0 "garbage input passes"          'not json'
+expect 2 "missing json flag"             '{"tool_name":"Bash","tool_input":{"command":"agy -p \"hi\" --print-timeout 540s","timeout":600000}}'
+expect 2 "missing timeout"               "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"hi\\\" $JT\"}}"
+expect 2 "timeout too short"             "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"hi\\\" $JT\",\"timeout\":120000}}"
+expect 2 "foreground missing print-timeout" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"hi\\\" $J\",\"timeout\":600000}}"
+expect 0 "json + timeout + print-timeout passes" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"hi\\\" $JT\",\"timeout\":600000}}"
+expect 0 "json + background passes"      "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"hi\\\" $J\",\"run_in_background\":true}}"
+expect 0 "=-style flags pass"            '{"tool_name":"Bash","tool_input":{"command":"agy --print \"hi\" --output-format=json --print-timeout=540s","timeout":600000}}'
+expect 2 "chained cd && agy caught"      '{"tool_name":"Bash","tool_input":{"command":"cd src && agy --prompt \"hi\"","timeout":600000}}'
+expect 2 "full path agy caught"          '{"tool_name":"Bash","tool_input":{"command":"~/.local/bin/agy -p hi","timeout":600000}}'
+expect 0 "agy-ish word not caught"       '{"tool_name":"Bash","tool_input":{"command":"echo legacy -p","timeout":1}}'
+
+exit $fail
