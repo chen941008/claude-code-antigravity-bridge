@@ -141,8 +141,11 @@ for w in workspaces:
     if w not in trusted:
         trusted.append(w)
 
-with open(file_path, 'w', encoding='utf-8') as f:
+# Write a sibling temp file, then rename: an interrupted run can't leave a truncated settings.json.
+tmp_path = file_path + ".tmp"
+with open(tmp_path, 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
+os.replace(tmp_path, file_path)
 
 print("[OK] settings.json updated successfully.")
 EOF

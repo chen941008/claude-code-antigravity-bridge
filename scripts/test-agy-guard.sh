@@ -30,4 +30,8 @@ expect 2 "chained cd && agy caught"      '{"tool_name":"Bash","tool_input":{"com
 expect 2 "full path agy caught"          '{"tool_name":"Bash","tool_input":{"command":"~/.local/bin/agy -p hi","timeout":600000}}'
 expect 0 "agy-ish word not caught"       '{"tool_name":"Bash","tool_input":{"command":"echo legacy -p","timeout":1}}'
 
+expect 0 "; inside quoted prompt not split" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"Fix A; then fix B\\\" $JT\",\"timeout\":600000}}"
+expect 0 "| and && inside single quotes not split" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p 'a | b && c' $JT\",\"timeout\":600000}}"
+expect 2 "real ; after quoted prompt still split" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"x; y\\\" $JT; agy -p hi\",\"timeout\":600000}}"
+
 exit $fail

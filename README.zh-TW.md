@@ -30,40 +30,40 @@ Google 官方 CLI 本身就支援無頭模式，Claude Code 可以直接用 Bash
 
 ### 步驟 1：執行自動設定腳本
 
-#### 方式 A：遠端一鍵執行（固定在 `v1.1.1` 版，完全不需預先修改系統執行權限）
+#### 方式 A：遠端一鍵執行（固定在 `v1.2.0` 版，完全不需預先修改系統執行權限）
 
 **macOS / Linux / WSL：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.sh | bash
 ```
 
 **Windows (PowerShell)：**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > 把遠端腳本直接 pipe 給 shell 執行，等於用你的權限跑別人的程式碼。本教學的初衷就是避開未經審查的程式碼，建議先閱讀腳本內容（或改用方式 B）。另外 `setup.sh` 需要 `python3` 來合併 `settings.json`。
 
-上面的網址指向固定標籤 `v1.1.1`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
+上面的網址指向固定標籤 `v1.2.0`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
 
-| 檔案 | SHA-256（`v1.1.1`） |
+| 檔案 | SHA-256（`v1.2.0`） |
 | --- | --- |
-| `setup.sh` | `fa3a881e051bc2c68c121a808fe7f0d6e707b336e8ccaffee7e5457d4cf76eef` |
-| `setup.ps1` | `0c3bb1a1b753f5633168434eff2acbe1fee06db573a63b7bf584e7bd4a5c09f1` |
+| `setup.sh` | `f9ccc614e9f4ca0104a13682442295c606cbaa0ea98ee44c0beaf3a6e8393641` |
+| `setup.ps1` | `f606fe5a58551014e147c30bfd54e44d302570b77de51258cb41262aa6288a22` |
 
 ```bash
 # macOS / Linux / WSL
-curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.sh
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.sh
 sha256sum setup.sh        # macOS 用：shasum -a 256 setup.sh
 bash setup.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.ps1 -OutFile setup.ps1
 (Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
@@ -226,6 +226,22 @@ _規則是以指令「前綴」比對：`"command(jq)"` 也會放行 `jq .name p
 之後再執行腳本，就會自動把標記區塊升級到最新版。重新執行**不會**移除舊版加進白名單的項目（例如 `pytest *`、`make *`）。不需要的話，請自行從 `~/.gemini/antigravity-cli/settings.json` 刪除。
 
 ---
+
+## 選用：用 PreToolUse Hook 強制執行規則
+
+`CLAUDE.md` 的規則只是建議，Claude 仍可能忘記。[`extras/claude-hook/agy_guard.py`](./extras/claude-hook/agy_guard.py) 是選用的 Claude Code hook，會在以下情況攔截無頭 `agy -p` 呼叫（exit code 2）：缺少 `--output-format json`、既沒有 `run_in_background` 也沒有 >= 600000 的 Bash `timeout`、前景呼叫缺少 `--print-timeout`，或仍有另一個無頭 `agy` 行程在執行（行程檢查是全機器範圍，其他專案的執行也可能觸發）。請加入 `.claude/settings.json`：
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "python3 /path/to/extras/claude-hook/agy_guard.py" }] }
+    ]
+  }
+}
+```
+
+遇到非預期輸入一律放行，因此 hook 本身的 bug 不會讓你無法使用 Bash。可用 `bash scripts/test-agy-guard.sh` 離線測試。
 
 ## 額度與安全檢查清單
 

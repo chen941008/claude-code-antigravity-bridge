@@ -91,6 +91,27 @@ if (Test-Path $SettingsFile) {
     }
 }
 
+# Reject wrongly typed fields up front (backup first), mirroring setup.sh.
+$BadShape = $null
+$PermProp = $Data.PSObject.Properties["permissions"]
+if ($PermProp) {
+    if (($null -eq $PermProp.Value) -or ($PermProp.Value -is [array]) -or ($PermProp.Value -is [string]) -or ($PermProp.Value -is [ValueType])) {
+        $BadShape = '"permissions" must be an object'
+    } else {
+        foreach ($Key in "allow", "deny") {
+            $Field = $PermProp.Value.PSObject.Properties[$Key]
+            if ($Field -and ($null -ne $Field.Value) -and -not ($Field.Value -is [array])) { $BadShape = "`"permissions.$Key`" must be an array" }
+        }
+    }
+}
+$TrustedProp = $Data.PSObject.Properties["trustedWorkspaces"]
+if ($TrustedProp -and ($null -ne $TrustedProp.Value) -and -not ($TrustedProp.Value -is [array])) { $BadShape = '"trustedWorkspaces" must be an array' }
+if ($BadShape) {
+    $Backup = "$SettingsFile.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    if (Test-Path -LiteralPath $SettingsFile) { Copy-Item -LiteralPath $SettingsFile -Destination $Backup }
+    throw "[ERROR] $BadShape in settings.json. Your settings were NOT modified; backup saved to $Backup. Fix the file and run this script again."
+}
+
 if (-not ($Data.PSObject.Properties.Name -contains "permissions")) {
     $Data | Add-Member -MemberType NoteProperty -Name "permissions" -Value (New-Object PSObject)
 }
@@ -155,7 +176,10 @@ $Data.trustedWorkspaces = [string[]]$TrustedList
 $JsonOut = $Data | ConvertTo-Json -Depth 10
 # CRITICAL: Write as UTF-8 WITHOUT BOM (\ufeff) to prevent agy settings malformed error
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText($SettingsFile, $JsonOut, $Utf8NoBom)
+# Write a sibling temp file, then move it over the original so an interrupted run can't truncate settings.json.
+$TmpFile = "$SettingsFile.tmp"
+[System.IO.File]::WriteAllText($TmpFile, $JsonOut, $Utf8NoBom)
+Move-Item -LiteralPath $TmpFile -Destination $SettingsFile -Force
 Write-Host "[OK] settings.json updated successfully (UTF-8 no BOM)."
 
 # 3. Create, update or append the CLAUDE.md rules block (non-destructive).

@@ -15,9 +15,11 @@ jobs:
       - name: Shell syntax and lint
         run: |
           bash -n setup.sh
-          shellcheck setup.sh scripts/check-rules-sync.sh
+          shellcheck setup.sh scripts/*.sh
       - name: CLAUDE.md rules are identical in setup.sh and setup.ps1
         run: bash scripts/check-rules-sync.sh
+      - name: Claude PreToolUse guard hook unit tests
+        run: bash scripts/test-agy-guard.sh
       - name: PowerShell syntax
         shell: pwsh
         run: |

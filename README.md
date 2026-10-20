@@ -30,40 +30,40 @@ Run the setup script inside your **project root directory** to automatically ins
 
 ### Step 1: Run the Setup Script
 
-#### Option A: Remote One-Liner, pinned to `v1.1.1` (No system permission changes required)
+#### Option A: Remote One-Liner, pinned to `v1.2.0` (No system permission changes required)
 
 **macOS / Linux / WSL:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > Piping a remote script into your shell runs it with your privileges. Since this guide exists to avoid unaudited code, read the script first (or use Option B), and note that `setup.sh` requires `python3` to merge `settings.json`.
 
-The URLs above point at the fixed tag `v1.1.1`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
+The URLs above point at the fixed tag `v1.2.0`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
 
-| File | SHA-256 (`v1.1.1`) |
+| File | SHA-256 (`v1.2.0`) |
 | --- | --- |
-| `setup.sh` | `fa3a881e051bc2c68c121a808fe7f0d6e707b336e8ccaffee7e5457d4cf76eef` |
-| `setup.ps1` | `0c3bb1a1b753f5633168434eff2acbe1fee06db573a63b7bf584e7bd4a5c09f1` |
+| `setup.sh` | `f9ccc614e9f4ca0104a13682442295c606cbaa0ea98ee44c0beaf3a6e8393641` |
+| `setup.ps1` | `f606fe5a58551014e147c30bfd54e44d302570b77de51258cb41262aa6288a22` |
 
 ```bash
 # macOS / Linux / WSL
-curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.sh
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.sh
 sha256sum setup.sh        # macOS: shasum -a 256 setup.sh
 bash setup.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.2.0/setup.ps1 -OutFile setup.ps1
 (Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
@@ -226,6 +226,22 @@ Rules added by versions **before `v1.1.0`** have no markers, so the script leave
 After that, re-running the script upgrades the marked block in place automatically. Re-running does **not** remove allowlist entries added by older versions (such as `pytest *` and `make *`). Remove them by hand from `~/.gemini/antigravity-cli/settings.json` if you do not want them.
 
 ---
+
+## Optional: Hard-Enforce the Rules with a PreToolUse Hook
+
+`CLAUDE.md` rules are advice; Claude can still forget them. [`extras/claude-hook/agy_guard.py`](./extras/claude-hook/agy_guard.py) is an optional Claude Code hook that blocks a headless `agy -p` call (exit code 2) when `--output-format json` is missing, when neither `run_in_background` nor a Bash `timeout` >= 600000 is set, when a foreground call lacks `--print-timeout`, or when another headless `agy` run is still alive (the process check is machine-wide, so a run in another project can trigger it too). Add it to `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "python3 /path/to/extras/claude-hook/agy_guard.py" }] }
+    ]
+  }
+}
+```
+
+Unexpected input always passes through, so a bug in the hook cannot lock you out of Bash. Test it offline with `bash scripts/test-agy-guard.sh`.
 
 ## Quota & Security Checklist
 

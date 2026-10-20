@@ -27,11 +27,22 @@ AGY_CMD = re.compile(r"(?:^|[\s/(`])agy(?:\.exe)?(?=\s)")
 PRINT_FLAG = re.compile(r"\s(?:-p|--print|--prompt)(?=\s|=|$)")
 JSON_FLAG = re.compile(r"\s--output-format(?:=|\s+)[\"']?json[\"']?(?=\s|$)")
 PRINT_TIMEOUT_FLAG = re.compile(r"\s--print-timeout(?:=|\s+)\S+")
-SEGMENT_SPLIT = re.compile(r"&&|\|\||[;|\n]")
+# Quoted strings are skipped so a prompt like "fix A; then B" is not split in the middle.
+SEGMENT_SPLIT = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|(&&|\|\||[;|\n])""", re.DOTALL)
+
+
+def split_shell_segments(command):
+    segments, last = [], 0
+    for m in SEGMENT_SPLIT.finditer(command):
+        if m.group(1):  # a real separator, not one inside quotes
+            segments.append(command[last:m.start()])
+            last = m.end()
+    segments.append(command[last:])
+    return segments
 
 
 def headless_agy_segments(command):
-    return [s for s in SEGMENT_SPLIT.split(command) if AGY_CMD.search(s) and PRINT_FLAG.search(s)]
+    return [s for s in split_shell_segments(command) if AGY_CMD.search(s) and PRINT_FLAG.search(s)]
 
 
 def agy_already_running():
