@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -e
+# pipefail matters here: 'curl ... | bash' must fail when the download fails.
+set -euo pipefail
 
 echo "[INFO] Initializing Claude Code x Antigravity (agy) integration..."
 
@@ -32,11 +33,25 @@ if ! git -C "$REAL_DIR" rev-parse --is-inside-work-tree &> /dev/null; then
     fi
 fi
 
+# python3 is needed to merge settings.json; check before installing anything.
+if ! command -v python3 &> /dev/null; then
+    echo "[ERROR] python3 is required to merge settings.json but was not found. Install it and run again."
+    exit 1
+fi
+
 # 1. Check and install agy
 if ! command -v agy &> /dev/null; then
     echo "[INFO] 'agy' not found. Running official installer..."
-    curl -fsSL https://antigravity.google/cli/install.sh | bash
+    if ! curl -fsSL https://antigravity.google/cli/install.sh | bash; then
+        echo "[ERROR] The agy installer failed (download or install error). Nothing was configured."
+        exit 1
+    fi
     export PATH="$HOME/.local/bin:$PATH"
+    if ! command -v agy &> /dev/null; then
+        echo "[ERROR] The installer finished but 'agy' is still not on PATH."
+        echo "        Open a new terminal (or add ~/.local/bin to PATH) and run this script again."
+        exit 1
+    fi
 else
     echo "[OK] 'agy' is already installed."
 fi

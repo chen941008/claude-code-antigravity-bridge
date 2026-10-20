@@ -52,6 +52,9 @@ if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
         $env:Path = "$AgyBin;$env:Path"
         Write-Host "[INFO] Added $AgyBin to current session PATH."
     }
+    if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
+        throw "[ERROR] The installer finished but 'agy' is still not on PATH. Open a new PowerShell window and run this script again."
+    }
 } else {
     Write-Host "[OK] 'agy' is already installed."
 }
