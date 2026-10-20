@@ -51,7 +51,7 @@ The URLs above point at the fixed tag `v1.3.0`, not the moving `main` branch, so
 
 | File | SHA-256 (`v1.3.0`) |
 | --- | --- |
-| `setup.sh` | `69af1347a6c4eb5d7174c17d0b9d279e0e9de990d1b0e103491343028e8a74c5` |
+| `setup.sh` | `b8100ee6073ddb1df1c3b3e434096a54aa526eda1b76152092c3512a02a332e8` |
 | `setup.ps1` | `43a9b5cfef519a0480acde37524b1c540364068c0fe440dac6b39ba8c6f885b4` |
 
 ```bash
@@ -121,6 +121,22 @@ Once you see `"status": "SUCCESS"`, launch `claude` and start delegating tasks:
 ```text
 > Write unit tests for all modules under src/api/. Delegate this batch work to agy according to CLAUDE.md.
 ```
+
+### Step 4 (Optional): Check the Installation
+
+From your project root, run the self-check. It never calls a model, so it costs no quota. It confirms that `agy` is on PATH, that `settings.json` is valid and has the rules for this project, that `CLAUDE.md` has the current rules block, and prints your quota groups:
+
+```bash
+# macOS / Linux / WSL (the repo's scripts/ folder; or download verify.sh from the same tag as setup.sh)
+bash scripts/verify.sh
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+```
+
+Every line is `PASS`, `WARN` or `FAIL`; the exit code is the number of `FAIL` lines. Paste the output into a bug report if something is off. The same script runs in CI on Ubuntu, macOS and Windows (PowerShell 5.1 and 7) after every push.
 
 ---
 

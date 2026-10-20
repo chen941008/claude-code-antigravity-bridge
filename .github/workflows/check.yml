@@ -23,6 +23,129 @@ jobs:
       - name: PowerShell syntax
         shell: pwsh
         run: |
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/setup.ps1", [ref]$null, [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          foreach ($f in "setup.ps1", "scripts/verify.ps1") {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile("$PWD/$f", [ref]$null, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error "${f}: $($_.Message)" }; exit 1 }
+          }
+
+  # Runs the real setup script and scripts/verify.* on each OS. A fake `agy` on PATH
+  # stands in for the real CLI (no login, no quota, no installer download).
+  install:
+    name: install (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ubuntu,             os: ubuntu-latest,  shell: bash }
+          - { name: macos,              os: macos-latest,   shell: bash }
+          - { name: windows-ps51,       os: windows-latest, shell: powershell }
+          - { name: windows-pwsh7,      os: windows-latest, shell: pwsh }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fake agy (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bin="$RUNNER_TEMP/fakebin"
+          mkdir -p "$bin"
+          cat > "$bin/agy" << 'FAKE'
+          #!/usr/bin/env bash
+          if [ "$1" = "-p" ] && [ "$2" = "/usage" ]; then
+            echo '{"status":"SUCCESS","response":"","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"window":"weekly","remaining_fraction":0.99,"reset_time":"x"},{"window":"5h","remaining_fraction":0.5,"reset_time":"x"}]}]}}}'
+          fi
+          FAKE
+          chmod +x "$bin/agy"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Fake agy (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:RUNNER_TEMP "fakebin"
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          Set-Content (Join-Path $bin "usage.json") '{"status":"SUCCESS","response":"","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"window":"weekly","remaining_fraction":0.99,"reset_time":"x"},{"window":"5h","remaining_fraction":0.5,"reset_time":"x"}]}]}}}' -Encoding ASCII
+          Set-Content (Join-Path $bin "agy.cmd") '@type "%~dp0usage.json"' -Encoding ASCII
+          Add-Content $env:GITHUB_PATH $bin
+
+      - name: Fresh install, re-run, and malformed settings (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -u
+          proj="$RUNNER_TEMP/proj"
+          mkdir -p "$proj" && cd "$proj" && git init -q
+          settings="$HOME/.gemini/antigravity-cli/settings.json"
+          rm -f "$settings"
+
+          bash "$GITHUB_WORKSPACE/setup.sh"
+          bash "$GITHUB_WORKSPACE/scripts/verify.sh"
+          echo "--- second run must be idempotent"
+          bash "$GITHUB_WORKSPACE/setup.sh"
+          bash "$GITHUB_WORKSPACE/scripts/verify.sh"
+
+          echo "--- malformed settings must abort, keep a .bak, and stay untouched"
+          for bad in '{"permissions": null}' '{"permissions": {"allow": "command(ls)"}}' '{"trustedWorkspaces": "x"}' '{"permissions": []}' '{"permissions": '; do
+            rm -f "$settings".bak-*
+            printf '%s' "$bad" > "$settings"
+            if bash "$GITHUB_WORKSPACE/setup.sh"; then echo "setup.sh accepted: $bad"; exit 1; fi
+            [ "$(cat "$settings")" = "$bad" ] || { echo "settings changed for: $bad"; exit 1; }
+            ls "$settings".bak-* > /dev/null || { echo "no .bak for: $bad"; exit 1; }
+          done
+
+          echo "--- valid edge cases must pass"
+          for ok in '{}' '{"permissions": {"allow": []}}' '{"permissions": {"allow": null}}'; do
+            printf '%s' "$ok" > "$settings"
+            bash "$GITHUB_WORKSPACE/setup.sh"
+            bash "$GITHUB_WORKSPACE/scripts/verify.sh"
+          done
+
+      - name: Fresh install, re-run, and malformed settings (Windows)
+        if: runner.os == 'Windows'
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $ps = "${{ matrix.shell }}"
+          $setup = Join-Path $env:GITHUB_WORKSPACE "setup.ps1"
+          $verify = Join-Path $env:GITHUB_WORKSPACE "scripts\verify.ps1"
+          $proj = Join-Path $env:RUNNER_TEMP "proj"
+          New-Item -ItemType Directory -Force $proj | Out-Null
+          Set-Location $proj
+          git init -q
+          $settings = Join-Path $HOME ".gemini\antigravity-cli\settings.json"
+          Remove-Item $settings -Force -ErrorAction SilentlyContinue
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+
+          function Run($file) {
+            & $ps -NoProfile -ExecutionPolicy Bypass -File $file
+            return $LASTEXITCODE
+          }
+          function Must-Pass($file) {
+            $code = Run $file
+            if ($code -ne 0) { throw "$file exited with $code" }
+          }
+
+          Must-Pass $setup
+          Must-Pass $verify
+          "--- second run must be idempotent"
+          Must-Pass $setup
+          Must-Pass $verify
+
+          "--- malformed settings must abort, keep a .bak, and stay untouched"
+          $bad = @('{"permissions": null}', '{"permissions": {"allow": "command(ls)"}}', '{"trustedWorkspaces": "x"}', '{"permissions": []}', '{"permissions": ')
+          foreach ($b in $bad) {
+            Get-ChildItem (Split-Path $settings) -Filter "settings.json.bak-*" | Remove-Item -Force
+            [IO.File]::WriteAllText($settings, $b, $utf8)
+            if ((Run $setup) -eq 0) { throw "setup.ps1 accepted: $b" }
+            if ([IO.File]::ReadAllText($settings) -ne $b) { throw "settings changed for: $b" }
+            if (@(Get-ChildItem (Split-Path $settings) -Filter "settings.json.bak-*").Count -lt 1) { throw "no .bak for: $b" }
+          }
+
+          "--- valid edge cases must pass"
+          foreach ($ok in @('{}', '{"permissions": {"allow": []}}', '{"permissions": {"allow": null}}')) {
+            [IO.File]::WriteAllText($settings, $ok, $utf8)
+            Must-Pass $setup
+            Must-Pass $verify
+          }

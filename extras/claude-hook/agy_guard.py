@@ -5,7 +5,7 @@ Blocks a Bash tool call that runs headless agy (`agy -p` / `--print` / `--prompt
   1. `--output-format json` is missing (Claude can't check status / denied_actions otherwise)
   2. it is neither `run_in_background` nor given a Bash `timeout` >= 600000 ms
   3. it runs in the foreground without `--print-timeout` (Claude Code does not kill a
-     timed-out command, so agy must stop itself; verified with scripts/probe-bash-timeout.sh)
+     timed-out command, so agy must stop itself, verified by experiment)
   4. another headless agy run from the same project directory is still alive (e.g. orphaned
      by an earlier timeout); runs started elsewhere are ignored when their cwd can be read
 

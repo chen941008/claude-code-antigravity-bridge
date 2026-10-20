@@ -60,8 +60,8 @@ fi
 # 2. Safely merge ~/.gemini/antigravity-cli/settings.json
 SETTINGS_DIR="$HOME/.gemini/antigravity-cli"
 SETTINGS_FILE="$SETTINGS_DIR/settings.json"
-# agy resolves symlinks before matching write_file rules (verified with
-# scripts/probe-agy-paths.sh), so the write rule must use the physical path.
+# agy resolves symlinks before matching write_file rules (verified by experiment),
+# so the write rule must use the physical path.
 CURRENT_DIR="$REAL_DIR"
 
 mkdir -p "$SETTINGS_DIR"
@@ -100,9 +100,11 @@ if not isinstance(data, dict):
 perms = data.setdefault("permissions", {})
 if not isinstance(perms, dict):
     abort('"permissions" in settings.json must be an object.')
-allow = perms.setdefault("allow", [])
-deny = perms.setdefault("deny", [])
-trusted = data.setdefault("trustedWorkspaces", [])
+# A null value counts as "not set" (setup.ps1 treats it the same way).
+for container, key in ((perms, "allow"), (perms, "deny"), (data, "trustedWorkspaces")):
+    if container.get(key) is None:
+        container[key] = []
+allow, deny, trusted = perms["allow"], perms["deny"], data["trustedWorkspaces"]
 for key, value in (("permissions.allow", allow), ("permissions.deny", deny), ("trustedWorkspaces", trusted)):
     if not isinstance(value, list):
         abort(f'"{key}" in settings.json must be an array.')
@@ -113,7 +115,7 @@ for key, value in (("permissions.allow", allow), ("permissions.deny", deny), ("t
 # File writes are allowed only inside this project directory (trustedWorkspaces alone
 # does not grant write_file in headless mode; "write_file(*)" would allow any path).
 # Write rule only for the physical path (agy resolves symlinks first); the logical
-# path is still trusted, which the probe showed works when entering via a symlink.
+# path is still trusted, which experiments showed works when entering via a symlink.
 default_allow = [f"write_file({workspaces[0].rstrip('/')}/)",
     "command(ls)",
     "command(git status)",

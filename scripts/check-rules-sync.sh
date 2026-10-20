@@ -22,5 +22,10 @@ if sh != ps:
     sys.stderr.write("".join(difflib.unified_diff(
         sh.splitlines(True), ps.splitlines(True), "setup.sh", "setup.ps1")))
     sys.exit("Rules blocks in setup.sh and setup.ps1 are out of sync.")
-print("OK: rules blocks in setup.sh and setup.ps1 are identical.")
+marker = re.match(r"<!-- agy-bridge:start (v\d+) -->", sh).group(1)
+for path, pat in (("scripts/verify.sh", r'EXPECTED_RULES="(v\d+)"'), ("scripts/verify.ps1", r'\$ExpectedRules = "(v\d+)"')):
+    found = re.search(pat, open(path, encoding="utf-8").read())
+    if not found or found.group(1) != marker:
+        sys.exit(f"{path} expects rules {found and found.group(1)} but setup.sh ships {marker}")
+print("OK: rules blocks in setup.sh and setup.ps1 are identical, verify scripts expect " + marker + ".")
 PY

@@ -51,7 +51,7 @@ irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/
 
 | 檔案 | SHA-256（`v1.3.0`） |
 | --- | --- |
-| `setup.sh` | `69af1347a6c4eb5d7174c17d0b9d279e0e9de990d1b0e103491343028e8a74c5` |
+| `setup.sh` | `b8100ee6073ddb1df1c3b3e434096a54aa526eda1b76152092c3512a02a332e8` |
 | `setup.ps1` | `43a9b5cfef519a0480acde37524b1c540364068c0fe440dac6b39ba8c6f885b4` |
 
 ```bash
@@ -121,6 +121,22 @@ agy -p "用一句話解釋 git status" --output-format json
 ```text
 > 幫 src/api/ 底下所有模組補上單元測試，這種批次的事情請依據 CLAUDE.md 外包給 agy。
 ```
+
+### 步驟 4（選用）：檢查安裝結果
+
+在專案根目錄執行自我檢查。它不會呼叫任何模型，所以不耗額度。會確認 `agy` 已在 PATH、`settings.json` 格式正確且包含這個專案的規則、`CLAUDE.md` 是最新的規則區塊，並列出你的額度分組：
+
+```bash
+# macOS / Linux / WSL（repo 內的 scripts/ 資料夾；或從與 setup.sh 同一個 tag 下載 verify.sh）
+bash scripts/verify.sh
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+```
+
+每一行是 `PASS`、`WARN` 或 `FAIL`；結束代碼等於 `FAIL` 的行數。若有異常，回報問題時請附上輸出。同一支腳本每次 push 後也會在 CI 的 Ubuntu、macOS 與 Windows（PowerShell 5.1 與 7）上執行。
 
 ---
 
