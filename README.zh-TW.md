@@ -229,7 +229,7 @@ _規則是以指令「前綴」比對：`"command(jq)"` 也會放行 `jq .name p
 
 ## 選用：用 PreToolUse Hook 強制執行規則
 
-`CLAUDE.md` 的規則只是建議，Claude 仍可能忘記。[`extras/claude-hook/agy_guard.py`](./extras/claude-hook/agy_guard.py) 是選用的 Claude Code hook，會在以下情況攔截無頭 `agy -p` 呼叫（exit code 2）：缺少 `--output-format json`、既沒有 `run_in_background` 也沒有 >= 600000 的 Bash `timeout`、前景呼叫缺少 `--print-timeout`，或仍有另一個無頭 `agy` 行程在執行（行程檢查是全機器範圍，其他專案的執行也可能觸發）。請加入 `.claude/settings.json`：
+`CLAUDE.md` 的規則只是建議，Claude 仍可能忘記。[`extras/claude-hook/agy_guard.py`](./extras/claude-hook/agy_guard.py) 是選用的 Claude Code hook，會在以下情況攔截無頭 `agy -p` 呼叫（exit code 2）：缺少 `--output-format json`、既沒有 `run_in_background` 也沒有 >= 600000 的 Bash `timeout`、前景呼叫缺少 `--print-timeout`，或同一個專案目錄仍有另一個無頭 `agy` 行程在執行（能讀到工作目錄時會忽略其他專案的行程，讀不到時保守地攔截）。請加入 `.claude/settings.json`：
 
 ```json
 {

@@ -6,7 +6,8 @@ Blocks a Bash tool call that runs headless agy (`agy -p` / `--print` / `--prompt
   2. it is neither `run_in_background` nor given a Bash `timeout` >= 600000 ms
   3. it runs in the foreground without `--print-timeout` (Claude Code does not kill a
      timed-out command, so agy must stop itself; verified with scripts/probe-bash-timeout.sh)
-  4. another headless agy run is still alive (e.g. orphaned by an earlier timeout)
+  4. another headless agy run from the same project directory is still alive (e.g. orphaned
+     by an earlier timeout); runs started elsewhere are ignored when their cwd can be read
 
 Blocking = exit code 2 with the reason on stderr; Claude Code shows that reason to Claude.
 Everything else passes through (exit 0). Any unexpected input also passes through, so a
@@ -16,6 +17,7 @@ The dirty-worktree check is intentionally NOT enforced: read-only delegations ar
 on a dirty tree (CLAUDE.md rule 1), and a hook can't tell read-only from write tasks.
 """
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -45,12 +47,37 @@ def headless_agy_segments(command):
     return [s for s in split_shell_segments(command) if AGY_CMD.search(s) and PRINT_FLAG.search(s)]
 
 
-def agy_already_running():
+def process_cwd(pid):
+    """Best-effort working directory of a process, or None if it can't be determined."""
+    try:
+        return os.path.realpath(os.readlink(f"/proc/{pid}/cwd"))  # Linux
+    except OSError:
+        pass
+    if shutil.which("lsof"):  # macOS
+        out = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fn", "-p", str(pid)],
+                             capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if line.startswith("n"):
+                return os.path.realpath(line[1:])
+    return None
+
+
+def agy_already_running(project_dir):
+    """True if a headless agy run started from this project (or an unknown dir) is alive."""
     if not shutil.which("pgrep"):
         return False  # Windows / minimal images: skip rather than guess
     # The hook runs before the new command starts, so any match is a previous run.
     pattern = r"(^|/)agy(\.exe)? .*(-p|--print|--prompt)( |=|$)"
-    return subprocess.run(["pgrep", "-f", pattern], stdout=subprocess.DEVNULL).returncode == 0
+    out = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True).stdout
+    project_dir = os.path.realpath(project_dir)
+    for pid in out.split():
+        if pid == str(os.getpid()):
+            continue
+        cwd = process_cwd(pid)
+        # An unknown cwd falls back to the old machine-wide behavior (assume same project).
+        if cwd is None or cwd == project_dir:
+            return True
+    return False
 
 
 def main():
@@ -83,7 +110,7 @@ def main():
             "add `--print-timeout 540s` so agy stops itself before the Bash tool times out "
             "(Claude Code leaves a timed-out command running)"
         )
-    if agy_already_running():
+    if agy_already_running(event.get("cwd") or os.getcwd()):
         problems.append(
             "another headless agy run is still alive (maybe orphaned by a timeout); "
             "wait for it or ask the user, and check `git status` before retrying"
