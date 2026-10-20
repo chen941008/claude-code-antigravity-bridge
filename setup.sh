@@ -103,22 +103,23 @@ for key, value in (("permissions.allow", allow), ("permissions.deny", deny), ("t
     if not isinstance(value, list):
         abort(f'"{key}" in settings.json must be an array.')
 
-# Read-only commands only. Anything that executes project code (pytest, make, ...)
+# Rules are prefix matches ('command(ls)' also allows 'ls -la'); a trailing ' *' does not
+# work (verified on agy, see README). Read-only commands only. Anything that executes project code (pytest, make, ...)
 # or reads file contents (cat, rg, ...) is opt-in; see README "How to Add CLI Skills".
 # File writes are allowed only inside this project directory (trustedWorkspaces alone
 # does not grant write_file in headless mode; "write_file(*)" would allow any path).
 default_allow = [
     f"write_file({workspace.rstrip('/')}/)",
     "command(ls)",
-    "command(ls *)",
     "command(git status)",
     "command(git diff)",
     "command(git log)"
 ]
 default_deny = [
-    "command(rm -rf *)",
-    "command(sudo *)",
-    "command(git push --force*)",
+    "command(rm -rf)",
+    "command(sudo)",
+    "command(git push --force)",
+    "command(git push -f)",
     "write_file(.git/)",
     "read_file(.env)"
 ]

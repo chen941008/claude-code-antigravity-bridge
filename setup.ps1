@@ -106,26 +106,28 @@ $AllowList = [System.Collections.ArrayList]@($Data.permissions.allow)
 $DenyList = [System.Collections.ArrayList]@($Data.permissions.deny)
 $TrustedList = [System.Collections.ArrayList]@($Data.trustedWorkspaces)
 
-# Read-only commands only. Anything that executes project code (pytest, npm, ...)
+# Rules are prefix matches ('command(ls)' also allows 'ls -la'); a trailing ' *' does not
+# work (verified on agy, see README). Read-only commands only. Anything that executes project code (pytest, npm, ...)
 # or reads file contents (cat, rg, ...) is opt-in; see README "How to Add CLI Skills".
 # File writes are allowed only inside this project directory (trustedWorkspaces alone
 # does not grant write_file in headless mode; "write_file(*)" would allow any path).
 $DefaultAllow = @(
     "write_file($($CurrentDir.TrimEnd('\'))\)",
     "command(ls)",
-    "command(ls *)",
     "command(dir)",
-    "command(dir *)",
     "command(Get-ChildItem)",
-    "command(Get-ChildItem *)",
     "command(git status)",
     "command(git diff)",
     "command(git log)"
 )
 $DefaultDeny = @(
-    "command(regex:(rm -rf|Remove-Item|rmdir /s /q|del /f /s /q).*)",
-    "command(sudo *)",
-    "command(git push --force*)",
+    "command(rm -rf)",
+    "command(Remove-Item)",
+    "command(rmdir)",
+    "command(del)",
+    "command(sudo)",
+    "command(git push --force)",
+    "command(git push -f)",
     "write_file(.git/)",
     "read_file(.env)"
 )
