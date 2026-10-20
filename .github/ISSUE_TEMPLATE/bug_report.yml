@@ -1,0 +1,72 @@
+name: Bug report
+description: Something in the setup script, the CLAUDE.md rules, or the docs does not work as described.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please check the [troubleshooting guide](https://github.com/chen941008/claude-code-antigravity-bridge/blob/main/docs/TROUBLESHOOTING.md) first. English or 繁體中文 are both fine.
+
+        **Do not paste secrets.** Remove tokens, `.env` contents, and private paths from any output below.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I read docs/TROUBLESHOOTING.md and my problem is not listed there.
+          required: true
+        - label: I ran the latest `setup.sh` / `setup.ps1` from `main` (older versions keep old rules in CLAUDE.md; see README Q5).
+          required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Environment
+      options:
+        - macOS
+        - Windows (PowerShell 5.1)
+        - Windows (PowerShell 7+)
+        - WSL
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: agy-version
+    attributes:
+      label: agy version
+      description: Output of `agy --version`.
+      placeholder: "1.4.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How did you run the setup?
+      options:
+        - Remote one-liner (curl | bash / irm | iex)
+        - Local script (bash setup.sh / setup.ps1)
+        - Not applicable (docs or CLAUDE.md rules issue)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: |
+        For delegation problems, include the JSON from `agy -p ... --output-format json`
+        (especially `status`, `response`, `denied_actions`) and the `stderr` line starting with `jetski:`.
+        For setup problems, include the full script output.
+      render: shell
+  - type: textarea
+    id: settings
+    attributes:
+      label: permissions section of settings.json
+      description: Paste only the `permissions` and `trustedWorkspaces` parts of `~/.gemini/antigravity-cli/settings.json`. Replace private paths.
+      render: json

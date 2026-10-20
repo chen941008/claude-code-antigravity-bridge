@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/chen941008/claude-code-antigravity-bridge/blob/main/docs/TROUBLESHOOTING.md
+    about: Common problems (empty response, permission denied, agy not found, BOM errors) and their fixes.
+  - name: Security vulnerability
+    url: https://github.com/chen941008/claude-code-antigravity-bridge/security/advisories/new
+    about: Report security issues privately, not in a public issue.
