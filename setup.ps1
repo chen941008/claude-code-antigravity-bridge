@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+try {
 Write-Host "[INFO] Initializing Claude Code x Antigravity (agy) integration (Windows)..."
 
 # 0. Make sure we're in a project directory. This directory becomes a trusted,
@@ -194,3 +195,17 @@ if ((Test-Path $ClaudeMd) -and ([System.IO.File]::ReadAllText($ClaudeMd) -match 
 
 Write-Host "------------------------------------------------------------------------"
 Write-Host "[DONE] Setup complete. Run 'agy' once to authenticate if you haven't already, then type '/exit'."
+} catch {
+    # Print a clean one-line message instead of PowerShell's multi-line error record.
+    # Don't 'exit' when piped into iex (that would close the user's window); do set a
+    # non-zero exit code when run as a file so callers can detect failure.
+    $Msg = $_.Exception.Message
+    if ($Msg -match '^\[INFO\]') {
+        Write-Host $Msg -ForegroundColor Yellow
+    } elseif ($Msg -match '^\[ERROR\]') {
+        Write-Host $Msg -ForegroundColor Red
+    } else {
+        Write-Host "[ERROR] Unexpected failure at line $($_.InvocationInfo.ScriptLineNumber): $Msg" -ForegroundColor Red
+    }
+    if ($MyInvocation.MyCommand.Path) { exit 1 }
+}
