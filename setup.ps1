@@ -12,8 +12,16 @@ if (($CheckDir -ieq $HomeDir) -or ($CheckDir -ieq $RootDir)) {
 }
 $IsGitRepo = $false
 if (Get-Command git -ErrorAction SilentlyContinue) {
-    & git -C $CheckDir rev-parse --is-inside-work-tree 2>$null | Out-Null
-    $IsGitRepo = ($LASTEXITCODE -eq 0)
+    # Windows PowerShell 5.1 turns native stderr into a terminating error under
+    # ErrorActionPreference=Stop (even with 2>$null), so relax it for this call only.
+    $PrevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & git -C $CheckDir rev-parse --is-inside-work-tree *> $null
+        $IsGitRepo = ($LASTEXITCODE -eq 0)
+    } finally {
+        $ErrorActionPreference = $PrevEap
+    }
 } else {
     $IsGitRepo = Test-Path (Join-Path $CheckDir ".git")
 }
