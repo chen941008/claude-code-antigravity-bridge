@@ -30,40 +30,40 @@ Run the setup script inside your **project root directory** to automatically ins
 
 ### Step 1: Run the Setup Script
 
-#### Option A: Remote One-Liner, pinned to `v1.1.0` (No system permission changes required)
+#### Option A: Remote One-Liner, pinned to `v1.1.1` (No system permission changes required)
 
 **macOS / Linux / WSL:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > Piping a remote script into your shell runs it with your privileges. Since this guide exists to avoid unaudited code, read the script first (or use Option B), and note that `setup.sh` requires `python3` to merge `settings.json`.
 
-The URLs above point at the fixed tag `v1.1.0`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
+The URLs above point at the fixed tag `v1.1.1`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
 
-| File | SHA-256 (`v1.1.0`) |
+| File | SHA-256 (`v1.1.1`) |
 | --- | --- |
-| `setup.sh` | `1d48cd7166647b59c2fb936578ed268091a67bd4b500c92af7fff37dee67069c` |
-| `setup.ps1` | `fbdad59e1907dbf6ba230dd8710ccd5b515898d7bbea8ffbb51fc443c4d698f2` |
+| `setup.sh` | `fa3a881e051bc2c68c121a808fe7f0d6e707b336e8ccaffee7e5457d4cf76eef` |
+| `setup.ps1` | `0c3bb1a1b753f5633168434eff2acbe1fee06db573a63b7bf584e7bd4a5c09f1` |
 
 ```bash
 # macOS / Linux / WSL
-curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.sh
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.sh
 sha256sum setup.sh        # macOS: shasum -a 256 setup.sh
 bash setup.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.ps1 -OutFile setup.ps1
 (Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
@@ -154,21 +154,21 @@ Claude Code **cannot** bypass `agy`'s internal permission checks for you. To gra
     "allow": [
       "write_file(/path/to/your/project/)",
       "command(ls)",
-      "command(ls *)",
       "command(git status)",
       "command(git diff)",
       "command(git log)",
-      "command(pytest *)",
-      "command(make *)",
-      "command(cargo test*)",
-      "command(jq *)",
-      "command(rg *)",
+      "command(pytest)",
+      "command(make)",
+      "command(cargo test)",
+      "command(jq)",
+      "command(rg)",
       "command(regex:npm run (build|lint|test))"
     ],
     "deny": [
-      "command(rm -rf *)",
-      "command(sudo *)",
-      "command(git push --force*)",
+      "command(rm -rf)",
+      "command(sudo)",
+      "command(git push --force)",
+      "command(git push -f)",
       "write_file(.git/)",
       "read_file(.env)"
     ]
@@ -177,16 +177,21 @@ Claude Code **cannot** bypass `agy`'s internal permission checks for you. To gra
 }
 ```
 
-_In the example above, `"command(jq *)"` and `"command(rg *)"` let `agy` parse JSON and run ripgrep searches without being soft-denied._
+_Rules are matched as command prefixes: `"command(jq)"` also allows `jq .name package.json`, and `"command(rg)"` also allows `rg TODO src/`._
 
-> [!WARNING]
-> **Allowlist rules match command prefixes, and chains count.** According to the [official permissions page](https://antigravity.google/docs/permissions?tab=cli), with `command(git)` allowed, `git status && git log` runs without prompting. The page does not say whether every segment of a chain is checked separately, so do not assume `command(ls *)` stops `ls x && curl ...`. Keep the allowlist narrow, do not allow interpreters or network tools (`bash`, `python`, `node`, `curl`, `wget`, `ssh`), and test once before trusting it:
+> [!IMPORTANT]
+> **Write `command(jq)`, not `command(jq *)`.** A trailing ` *` does not work. Verified on 2026-10-20 with headless `agy -p` on WSL (one run per case, `agy` asked to run each command verbatim):
 >
-> ```bash
-> agy -p "Run exactly this command: ls && echo CHAIN_OK" --output-format json
-> ```
+> | `permissions.allow` | Command | Result |
+> | --- | --- | --- |
+> | `command(ls *)` | `ls -la`, `ls` | denied |
+> | `command(ls)` | `ls -la` | allowed (prefix match) |
+> | `command(ls)` | `ls && echo ...`, `ls; echo ...`, `ls \| wc -l`, `ls $(echo ...)` | denied |
+> | `command(ls)` | `echo ...` (control) | denied |
 >
-> If `CHAIN_OK` appears in `response`, the second command ran; if it shows up in `denied_actions`, each segment is checked. Also note that the `command(x *)` form used in this guide is not explicitly documented on that page (it documents `*` only as a global wildcard). If a rule seems to be ignored, try `command(x)` instead.
+> So a prefix rule does not let extra chained, piped or substituted commands ride along. Not tested: chains where **every** segment is allowlisted (the [official page](https://antigravity.google/docs/permissions?tab=cli) says `git status && git log` runs when `command(git)` is allowed), and deny-rule matching. The deny rules in this repo use the same documented prefix form (`command(rm -rf)`, `command(sudo)`, ...) for that reason. Keep the allowlist narrow and do not allow interpreters or network tools (`bash`, `python`, `node`, `curl`, `wget`, `ssh`).
+>
+> If you ran an older version of the setup script, entries ending in ` *` (such as `command(ls *)`) are harmless no-ops; you can delete them. To re-check this behavior after an `agy` update, back up your `settings.json`, set `allow` to just `["command(ls)"]`, and run `agy -p "Run exactly this shell command, unmodified, and show its raw output: ls && echo CHAIN_OK" --output-format json`: the run should be denied and `CHAIN_OK` should not appear.
 
 ---
 

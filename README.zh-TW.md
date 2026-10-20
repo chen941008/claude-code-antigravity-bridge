@@ -30,40 +30,40 @@ Google 官方 CLI 本身就支援無頭模式，Claude Code 可以直接用 Bash
 
 ### 步驟 1：執行自動設定腳本
 
-#### 方式 A：遠端一鍵執行（固定在 `v1.1.0` 版，完全不需預先修改系統執行權限）
+#### 方式 A：遠端一鍵執行（固定在 `v1.1.1` 版，完全不需預先修改系統執行權限）
 
 **macOS / Linux / WSL：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.sh | bash
 ```
 
 **Windows (PowerShell)：**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > 把遠端腳本直接 pipe 給 shell 執行，等於用你的權限跑別人的程式碼。本教學的初衷就是避開未經審查的程式碼，建議先閱讀腳本內容（或改用方式 B）。另外 `setup.sh` 需要 `python3` 來合併 `settings.json`。
 
-上面的網址指向固定標籤 `v1.1.0`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
+上面的網址指向固定標籤 `v1.1.1`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
 
-| 檔案 | SHA-256（`v1.1.0`） |
+| 檔案 | SHA-256（`v1.1.1`） |
 | --- | --- |
-| `setup.sh` | `1d48cd7166647b59c2fb936578ed268091a67bd4b500c92af7fff37dee67069c` |
-| `setup.ps1` | `fbdad59e1907dbf6ba230dd8710ccd5b515898d7bbea8ffbb51fc443c4d698f2` |
+| `setup.sh` | `fa3a881e051bc2c68c121a808fe7f0d6e707b336e8ccaffee7e5457d4cf76eef` |
+| `setup.ps1` | `0c3bb1a1b753f5633168434eff2acbe1fee06db573a63b7bf584e7bd4a5c09f1` |
 
 ```bash
 # macOS / Linux / WSL
-curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.sh
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.sh
 sha256sum setup.sh        # macOS 用：shasum -a 256 setup.sh
 bash setup.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.1/setup.ps1 -OutFile setup.ps1
 (Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
@@ -154,21 +154,21 @@ Claude Code **無法**幫你繞過 `agy` 的內部權限限制。若你想賦予
     "allow": [
       "write_file(/path/to/your/project/)",
       "command(ls)",
-      "command(ls *)",
       "command(git status)",
       "command(git diff)",
       "command(git log)",
-      "command(pytest *)",
-      "command(make *)",
-      "command(cargo test*)",
-      "command(jq *)",
-      "command(rg *)",
+      "command(pytest)",
+      "command(make)",
+      "command(cargo test)",
+      "command(jq)",
+      "command(rg)",
       "command(regex:npm run (build|lint|test))"
     ],
     "deny": [
-      "command(rm -rf *)",
-      "command(sudo *)",
-      "command(git push --force*)",
+      "command(rm -rf)",
+      "command(sudo)",
+      "command(git push --force)",
+      "command(git push -f)",
       "write_file(.git/)",
       "read_file(.env)"
     ]
@@ -177,16 +177,21 @@ Claude Code **無法**幫你繞過 `agy` 的內部權限限制。若你想賦予
 }
 ```
 
-_如上例，加入 `"command(jq *)"` 與 `"command(rg *)"` 後，`agy` 在無頭模式下就能直接呼叫這兩個工具來處理 JSON 與搜尋程式碼，不會被軟拒絕。_
+_規則是以指令「前綴」比對：`"command(jq)"` 也會放行 `jq .name package.json`，`"command(rg)"` 也會放行 `rg TODO src/`。_
 
-> [!WARNING]
-> **白名單規則是以指令「前綴」比對，而且串接指令也算在內。** 依據[官方權限文件](https://antigravity.google/docs/permissions?tab=cli)，允許 `command(git)` 時，`git status && git log` 會直接執行不需詢問。文件並沒有說明串接指令的每一段是否各自檢查，因此不要假設 `command(ls *)` 能擋住 `ls x && curl ...`。請讓白名單保持精簡，不要放行直譯器或網路工具（`bash`、`python`、`node`、`curl`、`wget`、`ssh`），並在信任它之前自己測一次：
+> [!IMPORTANT]
+> **請寫 `command(jq)`，不要寫 `command(jq *)`。** 結尾加 ` *` 的寫法無效。2026-10-20 在 WSL 以無頭模式 `agy -p` 實測（每個情境各跑一次，請 `agy` 照字面執行指令）：
 >
-> ```bash
-> agy -p "Run exactly this command: ls && echo CHAIN_OK" --output-format json
-> ```
+> | `permissions.allow` | 指令 | 結果 |
+> | --- | --- | --- |
+> | `command(ls *)` | `ls -la`、`ls` | 被拒絕 |
+> | `command(ls)` | `ls -la` | 允許（前綴比對） |
+> | `command(ls)` | `ls && echo ...`、`ls; echo ...`、`ls \| wc -l`、`ls $(echo ...)` | 被拒絕 |
+> | `command(ls)` | `echo ...`（對照組） | 被拒絕 |
 >
-> 如果 `response` 裡出現 `CHAIN_OK`，代表第二段指令被執行了；如果它出現在 `denied_actions`，代表每一段都有各自檢查。另外，本教學使用的 `command(x *)` 寫法在該文件中沒有明確記載（文件只把 `*` 當作全域萬用字元）。若發現某條規則好像沒生效，可改用 `command(x)` 試試。
+> 也就是說，前綴規則不會讓串接、管線或指令替換夾帶的額外指令順便通過。**尚未測試**的有：串接的「每一段都在白名單內」的情況（[官方文件](https://antigravity.google/docs/permissions?tab=cli)提到允許 `command(git)` 時 `git status && git log` 會直接執行），以及 deny 規則的比對行為。因此本專案的 deny 規則也改用同樣有文件依據的前綴寫法（`command(rm -rf)`、`command(sudo)` 等）。請讓白名單保持精簡，不要放行直譯器或網路工具（`bash`、`python`、`node`、`curl`、`wget`、`ssh`）。
+>
+> 如果你執行過舊版設定腳本，裡面結尾是 ` *` 的項目（例如 `command(ls *)`）不會造成問題，只是沒有作用，可以自行刪除。`agy` 更新後想重新確認這個行為：先備份 `settings.json`，把 `allow` 只留 `["command(ls)"]`，再執行 `agy -p "Run exactly this shell command, unmodified, and show its raw output: ls && echo CHAIN_OK" --output-format json`，預期會被拒絕，且 `CHAIN_OK` 不會出現。
 
 ---
 
