@@ -70,6 +70,24 @@ English | [繁體中文](./TROUBLESHOOTING.zh-TW.md)
 
 ---
 
+## Setup Script Messages
+
+### 1. `[ERROR] Refusing to run in '...'`
+
+The current directory becomes a trusted, writable workspace for `agy`, so the scripts refuse to run in your home directory or a drive/filesystem root. `cd` into your project root and run again.
+
+### 2. `'...' is not a git repository` / `No terminal to confirm`
+
+Without git you cannot diff what `agy` changed, so the scripts ask before continuing. When the script is piped (`curl | bash`) the prompt is read from the terminal; if there is no terminal at all (CI, some IDE consoles), set `AGY_BRIDGE_FORCE=1` (`$env:AGY_BRIDGE_FORCE='1'` in PowerShell) after confirming this really is your project root.
+
+### 3. `Could not parse existing settings.json` / `settings.json.bak-<timestamp>`
+
+The script never overwrites a `settings.json` it cannot parse (for example one with a trailing comma or comments). It saves a copy as `settings.json.bak-<timestamp>` next to it, leaves the original untouched and stops. Fix the JSON and run again; delete the `.bak` files when you no longer need them.
+
+### 4. `CLAUDE.md has an older, unmarked Antigravity section`
+
+Rules written by versions before `v1.1.0` have no markers, so the script will not guess where they end. Delete the `## Delegating Tasks to Antigravity (agy)` section once and re-run; later upgrades are automatic.
+
 ## General FAQ (Permissions, Skills, Quota & Models)
 
 | Symptom / Question                                                                                                     | Cause & Resolution                                                                                                                                                                                                                                                                                                 |

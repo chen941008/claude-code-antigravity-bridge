@@ -30,22 +30,46 @@ Google 官方 CLI 本身就支援無頭模式，Claude Code 可以直接用 Bash
 
 ### 步驟 1：執行自動設定腳本
 
-#### 方式 A：遠端一鍵執行（推薦，完全不需預先修改系統執行權限）
+#### 方式 A：遠端一鍵執行（固定在 `v1.1.0` 版，完全不需預先修改系統執行權限）
 
 **macOS / Linux / WSL：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.sh | bash
 ```
 
 **Windows (PowerShell)：**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/main/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > 把遠端腳本直接 pipe 給 shell 執行，等於用你的權限跑別人的程式碼。本教學的初衷就是避開未經審查的程式碼，建議先閱讀腳本內容（或改用方式 B）。另外 `setup.sh` 需要 `python3` 來合併 `settings.json`。
+
+上面的網址指向固定標籤 `v1.1.0`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
+
+| 檔案 | SHA-256（`v1.1.0`） |
+| --- | --- |
+| `setup.sh` | `1d48cd7166647b59c2fb936578ed268091a67bd4b500c92af7fff37dee67069c` |
+| `setup.ps1` | `fbdad59e1907dbf6ba230dd8710ccd5b515898d7bbea8ffbb51fc443c4d698f2` |
+
+```bash
+# macOS / Linux / WSL
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.sh
+sha256sum setup.sh        # macOS 用：shasum -a 256 setup.sh
+bash setup.sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.ps1 -OutFile setup.ps1
+(Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+> [!NOTE]
+> 腳本內建的安全檢查：在家目錄或磁碟機／檔案系統根目錄會直接拒絕執行（因為目前所在目錄會變成 `agy` 的可寫工作區）；在非 git 資料夾會先詢問確認（非互動環境可設 `AGY_BRIDGE_FORCE=1` 略過）；遇到無法解析的 `settings.json` 絕不覆寫，會先備份成 `settings.json.bak-<時間戳>` 再中止。
 
 #### 方式 B：下載腳本至本地執行（免設定 `chmod` 與 `Set-ExecutionPolicy` 的寫法）
 
@@ -155,13 +179,22 @@ Claude Code **無法**幫你繞過 `agy` 的內部權限限制。若你想賦予
 
 _如上例，加入 `"command(jq *)"` 與 `"command(rg *)"` 後，`agy` 在無頭模式下就能直接呼叫這兩個工具來處理 JSON 與搜尋程式碼，不會被軟拒絕。_
 
+> [!WARNING]
+> **白名單規則是以指令「前綴」比對，而且串接指令也算在內。** 依據[官方權限文件](https://antigravity.google/docs/permissions?tab=cli)，允許 `command(git)` 時，`git status && git log` 會直接執行不需詢問。文件並沒有說明串接指令的每一段是否各自檢查，因此不要假設 `command(ls *)` 能擋住 `ls x && curl ...`。請讓白名單保持精簡，不要放行直譯器或網路工具（`bash`、`python`、`node`、`curl`、`wget`、`ssh`），並在信任它之前自己測一次：
+>
+> ```bash
+> agy -p "Run exactly this command: ls && echo CHAIN_OK" --output-format json
+> ```
+>
+> 如果 `response` 裡出現 `CHAIN_OK`，代表第二段指令被執行了；如果它出現在 `denied_actions`，代表每一段都有各自檢查。另外，本教學使用的 `command(x *)` 寫法在該文件中沒有明確記載（文件只把 `*` 當作全域萬用字元）。若發現某條規則好像沒生效，可改用 `command(x)` 試試。
+
 ---
 
 ## 常見問題與設計理念 (FAQ)
 
 ### Q1: 如果我的專案原本就已經有自己的 `CLAUDE.md`，執行自動設定腳本會把它覆蓋掉嗎？
 
-**完全不會。** 腳本採用「無損附加（Append）」的設計。如果它偵測到你已有 `CLAUDE.md`，它只會將外包規則安靜地加在文件最底端，絕不會更動你原有的程式碼規範。此外，腳本具備防重複檢查機制，多次執行也不會產生重複的規則片段。
+**完全不會。** 腳本採用「無損附加（Append）」的設計。如果它偵測到你已有 `CLAUDE.md`，它只會將外包規則安靜地加在文件最底端，絕不會更動你原有的程式碼規範。規則放在以 `<!-- agy-bridge:start v2 -->` / `<!-- agy-bridge:end -->` 標記包住的區塊裡，所以重複執行只會替換這個區塊，不會產生重複內容，也不會動到其他部分。
 
 ### Q2: Claude Code 如何決定要開哪個 `agy` 模型？未來模型改名或淘汰會不會壞掉？
 
@@ -180,12 +213,12 @@ _如上例，加入 `"command(jq *)"` 與 `"command(rg *)"` 後，`agy` 在無�
 
 ### Q5: 我之前跑過舊版設定腳本，要怎麼更新到新版規則？
 
-腳本偵測到 `CLAUDE.md` 已有 `Antigravity (agy)` 段落就會跳過，所以舊專案會繼續沿用舊規則（例如「`git status` 必須乾淨，必要時先 commit」，這會擋住唯讀任務）。升級步驟：
+**`v1.1.0` 之前**的版本寫入的規則沒有標記，腳本會保持原樣並顯示警告（舊規則例如「`git status` 必須乾淨，必要時先 commit」，這會擋住唯讀任務）。只需要手動遷移一次：
 
 1. 在你的 `CLAUDE.md` 刪除整段 `## Delegating Tasks to Antigravity (agy)`（它是附加在檔案結尾；你自己寫的內容請保留）。
-2. 在專案根目錄重新執行 `setup.sh` / `setup.ps1`。它會重新附加新規則，並合併 `settings.json`，不會產生重複項目。
+2. 在專案根目錄重新執行 `setup.sh` / `setup.ps1`。它會附加新的標記區塊，並合併 `settings.json`，不會產生重複項目。
 
-重新執行**不會**移除舊版加進白名單的項目（例如 `pytest *`、`make *`）。不需要的話，請自行從 `~/.gemini/antigravity-cli/settings.json` 刪除。
+之後再執行腳本，就會自動把標記區塊升級到最新版。重新執行**不會**移除舊版加進白名單的項目（例如 `pytest *`、`make *`）。不需要的話，請自行從 `~/.gemini/antigravity-cli/settings.json` 刪除。
 
 ---
 
@@ -194,4 +227,5 @@ _如上例，加入 `"command(jq *)"` 與 `"command(rg *)"` 後，`agy` 在無�
 - **額度計算**：Antigravity 依實際代理工作量與 Token 計費（每 5 小時刷新，另有每週上限）。每次無頭呼叫基礎上下文約耗費 6,000～10,000 `input_tokens`，建議將同類批次修改集中於單次呼叫或以 `--conversation` 接續。
 - **模型分池**：Gemini 與 Claude/GPT 模型分屬不同額度池，日常粗活建議用 Gemini Flash。
 - **家庭共用**：家庭群組內 Antigravity 額度為全家共用。
+- **輸出視為不可信資料**：規則會要求 Claude 把 `agy` 的輸出（以及 `agy` 從專案中讀到的內容）當成資料而不是指令，因為專案裡的檔案可能被植入惡意文字。接受變更前仍請檢查 diff。
 - **安全底線**：建議使用 Git 版控（有 Git 時規則會用 `git status` / `git diff`，沒有時改用備份或檔案清單比對）、禁止使用 `--dangerously-skip-permissions`，且每次外包後務必檢查變更。

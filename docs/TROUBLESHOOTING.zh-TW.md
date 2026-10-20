@@ -70,6 +70,24 @@
 
 ---
 
+## 設定腳本訊息說明
+
+### 1. `[ERROR] Refusing to run in '...'`
+
+目前所在目錄會變成 `agy` 的信任且可寫工作區，所以腳本會拒絕在家目錄或磁碟機／檔案系統根目錄執行。請先 `cd` 到你的專案根目錄再執行。
+
+### 2. `'...' is not a git repository` / `No terminal to confirm`
+
+沒有 git 就無法用 diff 檢查 `agy` 改了什麼，所以腳本會先詢問。以 pipe 方式執行（`curl | bash`）時，詢問會從終端機讀取輸入；若完全沒有終端機（CI、部分 IDE 主控台），請在確認這真的是你的專案根目錄後，設定 `AGY_BRIDGE_FORCE=1`（PowerShell 為 `$env:AGY_BRIDGE_FORCE='1'`）。
+
+### 3. `Could not parse existing settings.json` / `settings.json.bak-<時間戳>`
+
+腳本絕不會覆寫無法解析的 `settings.json`（例如有尾逗號或註解）。它會在旁邊存一份 `settings.json.bak-<時間戳>`，原檔保持不動並中止。修好 JSON 後再執行即可；用不到的 `.bak` 備份可自行刪除。
+
+### 4. `CLAUDE.md has an older, unmarked Antigravity section`
+
+`v1.1.0` 之前的版本寫入的規則沒有標記，腳本無法確定它到哪裡結束，所以不會自行處理。請手動刪除一次 `## Delegating Tasks to Antigravity (agy)` 段落後重新執行，之後的升級就會自動完成。
+
 ## 常見問題（權限、Skills、額度與模型調度）
 
 | 狀況 / 問題                                                                                 | 原因與處理                                                                                                                                                                                                                                                                                                                                                                                          |

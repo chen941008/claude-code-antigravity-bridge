@@ -30,22 +30,46 @@ Run the setup script inside your **project root directory** to automatically ins
 
 ### Step 1: Run the Setup Script
 
-#### Option A: Remote One-Liner (No system permission changes required)
+#### Option A: Remote One-Liner, pinned to `v1.1.0` (No system permission changes required)
 
 **macOS / Linux / WSL:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/main/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > Piping a remote script into your shell runs it with your privileges. Since this guide exists to avoid unaudited code, read the script first (or use Option B), and note that `setup.sh` requires `python3` to merge `settings.json`.
+
+The URLs above point at the fixed tag `v1.1.0`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
+
+| File | SHA-256 (`v1.1.0`) |
+| --- | --- |
+| `setup.sh` | `1d48cd7166647b59c2fb936578ed268091a67bd4b500c92af7fff37dee67069c` |
+| `setup.ps1` | `fbdad59e1907dbf6ba230dd8710ccd5b515898d7bbea8ffbb51fc443c4d698f2` |
+
+```bash
+# macOS / Linux / WSL
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.sh
+sha256sum setup.sh        # macOS: shasum -a 256 setup.sh
+bash setup.sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.1.0/setup.ps1 -OutFile setup.ps1
+(Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+> [!NOTE]
+> Safety checks built into the scripts: they refuse to run in your home directory or a drive/filesystem root (the current directory becomes a writable workspace for `agy`), ask for confirmation in a non-git folder (set `AGY_BRIDGE_FORCE=1` to skip the prompt in non-interactive runs), and never overwrite a `settings.json` they cannot parse; they save a `settings.json.bak-<timestamp>` and stop instead.
 
 #### Option B: Running Locally (If you cloned this repository)
 
@@ -155,13 +179,22 @@ Claude Code **cannot** bypass `agy`'s internal permission checks for you. To gra
 
 _In the example above, `"command(jq *)"` and `"command(rg *)"` let `agy` parse JSON and run ripgrep searches without being soft-denied._
 
+> [!WARNING]
+> **Allowlist rules match command prefixes, and chains count.** According to the [official permissions page](https://antigravity.google/docs/permissions?tab=cli), with `command(git)` allowed, `git status && git log` runs without prompting. The page does not say whether every segment of a chain is checked separately, so do not assume `command(ls *)` stops `ls x && curl ...`. Keep the allowlist narrow, do not allow interpreters or network tools (`bash`, `python`, `node`, `curl`, `wget`, `ssh`), and test once before trusting it:
+>
+> ```bash
+> agy -p "Run exactly this command: ls && echo CHAIN_OK" --output-format json
+> ```
+>
+> If `CHAIN_OK` appears in `response`, the second command ran; if it shows up in `denied_actions`, each segment is checked. Also note that the `command(x *)` form used in this guide is not explicitly documented on that page (it documents `*` only as a global wildcard). If a rule seems to be ignored, try `command(x)` instead.
+
 ---
 
 ## FAQ & Design Philosophy
 
 ### Q1: I already have project-specific instructions in my `CLAUDE.md`. Will the setup script overwrite them?
 
-**No.** The script uses a non-destructive append approach. If `CLAUDE.md` already exists, it simply appends the Antigravity delegation rules to the bottom of the file, leaving your existing instructions intact. It also checks for existing rules before appending to prevent duplicate entries on repeated runs.
+**No.** The script uses a non-destructive append approach. If `CLAUDE.md` already exists, it simply appends the Antigravity delegation rules to the bottom of the file, leaving your existing instructions intact. The rules live in a block wrapped in `<!-- agy-bridge:start v2 -->` / `<!-- agy-bridge:end -->` markers, so re-running the script replaces only that block and never duplicates it or touches anything else.
 
 ### Q2: How does Claude Code choose which `agy` model to use without wasting quota or breaking when models update?
 
@@ -180,12 +213,12 @@ See our comprehensive troubleshooting guide: **[docs/TROUBLESHOOTING.md](./docs/
 
 ### Q5: I ran an older version of the setup script. How do I get the updated rules?
 
-The script skips `CLAUDE.md` when it already contains the `Antigravity (agy)` section, so old projects keep the old rules (for example, "git status must be clean, commit if necessary", which blocks read-only tasks). To upgrade:
+Rules added by versions **before `v1.1.0`** have no markers, so the script leaves that section untouched and prints a warning (those old rules include, for example, "git status must be clean, commit if necessary", which blocks read-only tasks). Migrate once:
 
 1. In your `CLAUDE.md`, delete the whole `## Delegating Tasks to Antigravity (agy)` section (it was appended at the end; keep anything you wrote yourself).
-2. Re-run `setup.sh` / `setup.ps1` from the project root. It re-appends the new rules and merges `settings.json` without duplicating entries.
+2. Re-run `setup.sh` / `setup.ps1` from the project root. It appends the new marked block and merges `settings.json` without duplicating entries.
 
-Re-running does **not** remove allowlist entries added by older versions (such as `pytest *` and `make *`). Remove them by hand from `~/.gemini/antigravity-cli/settings.json` if you do not want them.
+After that, re-running the script upgrades the marked block in place automatically. Re-running does **not** remove allowlist entries added by older versions (such as `pytest *` and `make *`). Remove them by hand from `~/.gemini/antigravity-cli/settings.json` if you do not want them.
 
 ---
 
@@ -194,4 +227,5 @@ Re-running does **not** remove allowlist entries added by older versions (such a
 - **Quota consumption:** Antigravity quota is based on actual agent work/tokens (refreshes every 5 hours with a weekly cap). Each headless call loads ~6k–10k context tokens; batch related edits into a single task or reuse `--conversation <id>`.
 - **Model pools:** Gemini models and Claude/GPT models draw from separate quota pools. Use Gemini Flash for routine tasks.
 - **Family sharing:** Antigravity quota in a Google One family group is shared across all members.
+- **Untrusted output:** The rules tell Claude to treat `agy` output (and anything `agy` read from the repo) as data, never as instructions, because files in a repository can contain planted text. Still review diffs before accepting changes.
 - **Safety:** Prefer a Git repo (the rules use `git status` / `git diff` when available, and fall back to a backup or file-list check when not), never use `--dangerously-skip-permissions` outside ephemeral sandboxes, and always review the changes after delegation.
