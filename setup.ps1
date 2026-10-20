@@ -1,6 +1,37 @@
 $ErrorActionPreference = "Stop"
 Write-Host "[INFO] Initializing Claude Code x Antigravity (agy) integration (Windows)..."
 
+# 0. Make sure we're in a project directory. This directory becomes a trusted,
+#    writable workspace for agy, so refuse $HOME or a drive root and confirm non-git folders.
+#    Use 'throw' rather than 'exit': under 'irm | iex', exit would close the user's window.
+$CheckDir = (Get-Location).ProviderPath.TrimEnd('\')
+$HomeDir = ([System.IO.Path]::GetFullPath($HOME)).TrimEnd('\')
+$RootDir = ([System.IO.Path]::GetPathRoot($CheckDir)).TrimEnd('\')
+if (($CheckDir -ieq $HomeDir) -or ($CheckDir -ieq $RootDir)) {
+    throw "[ERROR] Refusing to run in '$CheckDir'. This directory would become writable by agy. cd into your project root and run again."
+}
+$IsGitRepo = $false
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    & git -C $CheckDir rev-parse --is-inside-work-tree 2>$null | Out-Null
+    $IsGitRepo = ($LASTEXITCODE -eq 0)
+} else {
+    $IsGitRepo = Test-Path (Join-Path $CheckDir ".git")
+}
+if (-not $IsGitRepo) {
+    Write-Host "[WARN] '$CheckDir' is not a git repository."
+    Write-Host "       agy will be allowed to write anywhere under this directory."
+    if ($env:AGY_BRIDGE_FORCE -eq "1") {
+        Write-Host "[INFO] AGY_BRIDGE_FORCE=1 set, continuing."
+    } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        $Reply = Read-Host "       Continue anyway? [y/N]"
+        if ($Reply -notmatch '^(y|yes)$') {
+            throw "[INFO] Aborted. Nothing was changed."
+        }
+    } else {
+        throw "[ERROR] No terminal to confirm. Set `$env:AGY_BRIDGE_FORCE='1' if this is really your project root."
+    }
+}
+
 # 1. Check and install agy
 if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
     Write-Host "[INFO] 'agy' not found. Running official installer..."
@@ -35,8 +66,14 @@ if (Test-Path $SettingsFile) {
             $Data = $RawJson | ConvertFrom-Json
         }
     } catch {
-        Write-Host "[WARN] Could not parse existing settings.json, creating new structure."
-        $Data = New-Object PSObject
+        # Never overwrite a settings file we couldn't understand: keep a backup and stop.
+        $Backup = "$SettingsFile.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        Copy-Item -LiteralPath $SettingsFile -Destination $Backup
+        throw "[ERROR] Could not parse existing settings.json ($($_.Exception.Message)). Your settings were NOT modified; backup saved to $Backup. Fix the file (e.g. remove trailing commas or comments) and run this script again."
+    }
+    # Note: '-is [PSCustomObject]' matches almost anything in PowerShell, so reject non-objects explicitly.
+    if (($Data -is [array]) -or ($Data -is [string]) -or ($Data -is [ValueType])) {
+        throw "[ERROR] settings.json must contain a JSON object at the top level. Your settings were NOT modified."
     }
 }
 

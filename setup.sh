@@ -3,6 +3,35 @@ set -e
 
 echo "[INFO] Initializing Claude Code x Antigravity (agy) integration..."
 
+# 0. Make sure we're in a project directory. This directory becomes a trusted,
+#    writable workspace for agy, so refuse $HOME or / and confirm non-git folders.
+REAL_DIR="$(pwd -P)"
+REAL_HOME="$(cd "$HOME" && pwd -P)"
+if [ "$REAL_DIR" = "/" ] || [ "$REAL_DIR" = "$REAL_HOME" ]; then
+    echo "[ERROR] Refusing to run in '$REAL_DIR'."
+    echo "        This directory would become writable by agy. cd into your project root and run again."
+    exit 1
+fi
+if ! git -C "$REAL_DIR" rev-parse --is-inside-work-tree &> /dev/null; then
+    echo "[WARN] '$REAL_DIR' is not a git repository."
+    echo "       agy will be allowed to write anywhere under this directory."
+    if [ "${AGY_BRIDGE_FORCE:-}" = "1" ]; then
+        echo "[INFO] AGY_BRIDGE_FORCE=1 set, continuing."
+    elif { exec 3< /dev/tty; } 2> /dev/null; then
+        # Read from the terminal, not stdin: stdin is the script itself under 'curl | bash'.
+        printf "       Continue anyway? [y/N] "
+        read -r REPLY <&3 || REPLY=""
+        exec 3<&-
+        case "$REPLY" in
+            [yY]|[yY][eE][sS]) ;;
+            *) echo "[INFO] Aborted. Nothing was changed."; exit 1 ;;
+        esac
+    else
+        echo "[ERROR] No terminal to confirm. Re-run with AGY_BRIDGE_FORCE=1 if this is really your project root."
+        exit 1
+    fi
+fi
+
 # 1. Check and install agy
 if ! command -v agy &> /dev/null; then
     echo "[INFO] 'agy' not found. Running official installer..."
@@ -21,10 +50,19 @@ mkdir -p "$SETTINGS_DIR"
 echo "[INFO] Updating permissions and trusted workspaces in $SETTINGS_FILE..."
 
 python3 - "$SETTINGS_FILE" "$CURRENT_DIR" << 'EOF'
-import json, os, sys
+import json, os, shutil, sys, time
 
 file_path = sys.argv[1]
 workspace = sys.argv[2]
+
+def abort(reason):
+    # Never overwrite a settings file we couldn't understand: keep a backup and stop.
+    backup = f"{file_path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+    shutil.copy2(file_path, backup)
+    print(f"[ERROR] {reason}")
+    print(f"        Your settings were NOT modified. A backup was saved to {backup}")
+    print("        Fix the file (e.g. remove trailing commas or comments) and run this script again.")
+    sys.exit(1)
 
 data = {}
 if os.path.exists(file_path):
@@ -32,15 +70,23 @@ if os.path.exists(file_path):
         # Use utf-8-sig to gracefully strip any accidental BOM
         with open(file_path, 'r', encoding='utf-8-sig') as f:
             content = f.read().strip()
-            if content:
-                data = json.loads(content)
+        if content:
+            data = json.loads(content)
     except Exception as e:
-        print(f"[WARN] Could not parse existing settings.json, creating new structure: {e}")
+        abort(f"Could not parse existing settings.json: {e}")
+
+if not isinstance(data, dict):
+    abort("settings.json must contain a JSON object at the top level.")
 
 perms = data.setdefault("permissions", {})
+if not isinstance(perms, dict):
+    abort('"permissions" in settings.json must be an object.')
 allow = perms.setdefault("allow", [])
 deny = perms.setdefault("deny", [])
 trusted = data.setdefault("trustedWorkspaces", [])
+for key, value in (("permissions.allow", allow), ("permissions.deny", deny), ("trustedWorkspaces", trusted)):
+    if not isinstance(value, list):
+        abort(f'"{key}" in settings.json must be an array.')
 
 # Read-only commands only. Anything that executes project code (pytest, make, ...)
 # or reads file contents (cat, rg, ...) is opt-in; see README "How to Add CLI Skills".
