@@ -1,5 +1,6 @@
 # Integration test for setup.ps1 (Windows). Run from anywhere:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\test-setup-ps1.ps1
+# It never calls exit, so it cannot close your PowerShell window.
 # It backs up your real agy settings.json first and always restores it at the end.
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI.
 $ErrorActionPreference = "Continue"
@@ -117,4 +118,3 @@ finally {
     ""
     "$script:Fail failure(s). Your real settings.json was restored."
 }
-exit $script:Fail
