@@ -28,6 +28,16 @@ Google 官方 CLI 本身就支援無頭模式，Claude Code 可以直接用 Bash
 
 在你的**專案根目錄**執行設定腳本，即可自動完成：**檢查並安裝 `agy`、以無 BOM 的 UTF-8 格式安全合併 `settings.json` 權限白名單、將當前目錄加入信任區、以及無損附加 `CLAUDE.md` 動態外包規則**。
 
+### 一分鐘看懂：哪些是全域、哪些跟專案走？
+
+| | 位置 | 頻率 |
+| --- | --- | --- |
+| 登入 `agy`（步驟 2） | 你的電腦（快取的登入憑證） | **只需一次** |
+| 允許／禁止規則與信任資料夾 | 全域一份：`~/.gemini/antigravity-cli/settings.json`（Windows：`C:\Users\<你>\.gemini\antigravity-cli\settings.json`）。每個你設定過的專案會把自己的資料夾加進去，原有的項目會保留。 | 每個專案 |
+| 給 Claude 的委派規則 | **該專案根目錄**的 `CLAUDE.md`。Claude Code 只會讀它所在專案的那一份。 | 每個專案 |
+
+所以每個新專案：`cd` 到專案根目錄，執行一次 setup 腳本（步驟 1）即可。步驟 2、3 只要做一次。沒跑過 setup 的專案沒有委派規則，`agy` 也不被允許在那裡寫檔。
+
 ### 步驟 1：執行自動設定腳本
 
 #### 方式 A：遠端一鍵執行（固定在 `v1.3.0` 版，完全不需預先修改系統執行權限）
@@ -137,6 +147,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 ```
 
 每一行是 `PASS`、`WARN` 或 `FAIL`；結束代碼等於 `FAIL` 的行數。若有異常，回報問題時請附上輸出。同一支腳本每次 push 後也會在 CI 的 Ubuntu、macOS 與 Windows（PowerShell 5.1 與 7）上執行。
+
+### 怎麼用、怎麼移除
+
+在跑過 setup 的專案裡啟動 `claude`。Claude Code 會讀 `CLAUDE.md` 的規則，自行判斷何時委派。批次工作（改很多檔、補單元測試、全專案搜尋、code review）很適合；架構決策與小改動則由 Claude 自己處理。這是引導而不是保證：想確保的話，直接說，例如「這個請依據 CLAUDE.md 外包給 agy」。預設 `agy` 只能執行 `ls`、`git status` 這類唯讀指令，要放行更多請看下方「如何新增 CLI 技能」教學。
+
+要從某個專案移除：刪掉該專案 `CLAUDE.md` 裡 `<!-- agy-bridge:start ... -->` 到 `<!-- agy-bridge:end -->` 之間的區塊，再從全域 `settings.json` 的 `permissions.allow`（那條 `write_file(...)`）與 `trustedWorkspaces` 刪掉該專案資料夾。目前沒有自動解除安裝。
+
+若 `scripts/verify.*` 或 setup 腳本警告 `CLAUDE.md` 有舊版、沒有標記的區塊，請看 [Q5](#q5-我之前跑過舊版設定腳本要怎麼更新到新版規則)：把舊區塊手動刪掉一次，再重新執行 setup。
 
 ---
 

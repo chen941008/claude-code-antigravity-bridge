@@ -28,6 +28,16 @@ User ──> Claude Code ──(Bash)──> agy -p "task" --output-format json 
 
 Run the setup script inside your **project root directory** to automatically install `agy`, merge safe allow/deny rules into `settings.json` (strictly formatted as UTF-8 without BOM), trust the current workspace, and append dynamic delegation rules to `CLAUDE.md`.
 
+### At a Glance: What Is Global, What Is Per Project?
+
+| | Where | How often |
+| --- | --- | --- |
+| Sign in to `agy` (Step 2) | Your computer (cached credentials) | **Once** |
+| Allow/deny rules and trusted folders | One global file: `~/.gemini/antigravity-cli/settings.json` (Windows: `C:\Users\<you>\.gemini\antigravity-cli\settings.json`). Each project you set up adds its own folder to it; existing entries are kept. | Each project |
+| Delegation rules for Claude | `CLAUDE.md` in **that project's root**. Claude Code only reads the one in the project it runs in. | Each project |
+
+So for every new project: `cd` into its root and run the setup script once (Step 1). Skip Steps 2 and 3, they are one-time. A project you never ran setup in has no delegation rules, and `agy` is not allowed to write there.
+
 ### Step 1: Run the Setup Script
 
 #### Option A: Remote One-Liner, pinned to `v1.3.0` (No system permission changes required)
@@ -137,6 +147,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 ```
 
 Every line is `PASS`, `WARN` or `FAIL`; the exit code is the number of `FAIL` lines. Paste the output into a bug report if something is off. The same script runs in CI on Ubuntu, macOS and Windows (PowerShell 5.1 and 7) after every push.
+
+### Using It, and Removing It
+
+Start `claude` inside a project you ran setup in. Claude Code reads the rules in `CLAUDE.md` and decides when to delegate. Bulk work (many-file edits, unit tests, repo-wide searches, code reviews) is a good fit; architecture decisions and small edits stay with Claude. It is guidance, not a guarantee: to be sure, say so explicitly, e.g. "Delegate this to agy according to CLAUDE.md". By default `agy` may only run read-only commands such as `ls` and `git status`; see the "How to Add CLI Skills" tutorial below to allow more.
+
+To remove it from a project: delete the block between `<!-- agy-bridge:start ... -->` and `<!-- agy-bridge:end -->` in that project's `CLAUDE.md`, then delete the project's folder from `permissions.allow` (the `write_file(...)` entry) and from `trustedWorkspaces` in the global `settings.json`. There is no automatic uninstall.
+
+If `scripts/verify.*` or the setup script warns about an older, unmarked section in `CLAUDE.md`, see [Q5](#q5-i-ran-an-older-version-of-the-setup-script-how-do-i-get-the-updated-rules): delete that old section once and re-run setup.
 
 ---
 
