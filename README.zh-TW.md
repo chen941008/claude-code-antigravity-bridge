@@ -40,40 +40,40 @@ Google 官方 CLI 本身就支援無頭模式，Claude Code 可以直接用 Bash
 
 ### 步驟 1：執行自動設定腳本
 
-#### 方式 A：遠端一鍵執行（固定在 `v1.3.0` 版，完全不需預先修改系統執行權限）
+#### 方式 A：遠端一鍵執行（固定在 `v1.4.0` 版，完全不需預先修改系統執行權限）
 
 **macOS / Linux / WSL：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/setup.sh | bash
 ```
 
 **Windows (PowerShell)：**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > 把遠端腳本直接 pipe 給 shell 執行，等於用你的權限跑別人的程式碼。本教學的初衷就是避開未經審查的程式碼，建議先閱讀腳本內容（或改用方式 B）。另外 `setup.sh` 需要 `python3` 來合併 `settings.json`。
 
-上面的網址指向固定標籤 `v1.3.0`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
+上面的網址指向固定標籤 `v1.4.0`，而不是會一直變動的 `main` 分支，所以你執行的程式碼不會在背後被改掉。若想再確認下載到的內容，可以比對 SHA-256（可防止傳輸過程被竄改；如果你連這個 repo 本身都不信任，請直接閱讀腳本原始碼）：
 
-| 檔案 | SHA-256（`v1.3.0`） |
+| 檔案 | SHA-256（`v1.4.0`） |
 | --- | --- |
-| `setup.sh` | `b8100ee6073ddb1df1c3b3e434096a54aa526eda1b76152092c3512a02a332e8` |
-| `setup.ps1` | `43a9b5cfef519a0480acde37524b1c540364068c0fe440dac6b39ba8c6f885b4` |
+| `setup.sh` | `90c12a2a3db3ee8b440f5d78d05b6e37203f4c52408df3fdc21357250a28b2aa` |
+| `setup.ps1` | `ed70145a5af45b57c5a915f4af766b60b842d4ab4b250a9addd93ca8a1008bfd` |
 
 ```bash
 # macOS / Linux / WSL
-curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.sh
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/setup.sh
 sha256sum setup.sh        # macOS 用：shasum -a 256 setup.sh
 bash setup.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/setup.ps1 -OutFile setup.ps1
 (Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
@@ -209,10 +209,10 @@ bash scripts/allow.sh --remove pytest
 未下載本專案時（單行指令直接執行）：
 ```bash
 # macOS / Linux / WSL
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/scripts/allow.sh | bash -s -- "npm test"
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/scripts/allow.sh | bash -s -- "npm test"
 
 # Windows (PowerShell)
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/scripts/allow.ps1))) "npm test"
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/scripts/allow.ps1))) "npm test"
 ```
 
 **小幫手的安全防護機制：**

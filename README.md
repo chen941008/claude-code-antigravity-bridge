@@ -40,40 +40,40 @@ So for every new project: `cd` into its root and run the setup script once (Step
 
 ### Step 1: Run the Setup Script
 
-#### Option A: Remote One-Liner, pinned to `v1.3.0` (No system permission changes required)
+#### Option A: Remote One-Liner, pinned to `v1.4.0` (No system permission changes required)
 
 **macOS / Linux / WSL:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/setup.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.ps1 | iex
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/setup.ps1 | iex
 ```
 
 > [!CAUTION]
 > Piping a remote script into your shell runs it with your privileges. Since this guide exists to avoid unaudited code, read the script first (or use Option B), and note that `setup.sh` requires `python3` to merge `settings.json`.
 
-The URLs above point at the fixed tag `v1.3.0`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
+The URLs above point at the fixed tag `v1.4.0`, not the moving `main` branch, so the code you run cannot change underneath you. To also check what you downloaded, compare its SHA-256 with the values below (this protects against tampering in transit; if you don't trust the repository itself, read the script):
 
-| File | SHA-256 (`v1.3.0`) |
+| File | SHA-256 (`v1.4.0`) |
 | --- | --- |
-| `setup.sh` | `b8100ee6073ddb1df1c3b3e434096a54aa526eda1b76152092c3512a02a332e8` |
-| `setup.ps1` | `43a9b5cfef519a0480acde37524b1c540364068c0fe440dac6b39ba8c6f885b4` |
+| `setup.sh` | `90c12a2a3db3ee8b440f5d78d05b6e37203f4c52408df3fdc21357250a28b2aa` |
+| `setup.ps1` | `ed70145a5af45b57c5a915f4af766b60b842d4ab4b250a9addd93ca8a1008bfd` |
 
 ```bash
 # macOS / Linux / WSL
-curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.sh
+curl -fsSLO https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/setup.sh
 sha256sum setup.sh        # macOS: shasum -a 256 setup.sh
 bash setup.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/setup.ps1 -OutFile setup.ps1
 (Get-FileHash .\setup.ps1 -Algorithm SHA256).Hash
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
@@ -209,10 +209,10 @@ bash scripts/allow.sh --remove pytest
 Without cloning the repository (one-line command):
 ```bash
 # macOS / Linux / WSL
-curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/scripts/allow.sh | bash -s -- "npm test"
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/scripts/allow.sh | bash -s -- "npm test"
 
 # Windows (PowerShell)
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/scripts/allow.ps1))) "npm test"
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.4.0/scripts/allow.ps1))) "npm test"
 ```
 
 **Built-in Safety Checks:**
