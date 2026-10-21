@@ -5,17 +5,31 @@ set -euo pipefail
 echo "[INFO] Initializing AI Agent x Antigravity (agy) integration (CLAUDE.md / AGENTS.md)..."
 
 TARGET_DOCS=("CLAUDE.md" "AGENTS.md")
-case "${1:-${AGY_BRIDGE_TARGETS:-all}}" in
-    --claude|--claude-only|claude|CLAUDE.md)
-        TARGET_DOCS=("CLAUDE.md") ;;
-    --agents|--agents-only|--codex|agents|codex|AGENTS.md)
-        TARGET_DOCS=("AGENTS.md") ;;
-    --all|all|"CLAUDE.md,AGENTS.md"|"")
-        TARGET_DOCS=("CLAUDE.md" "AGENTS.md") ;;
-    *)
-        echo "[ERROR] Unknown target option: '${1:-$AGY_BRIDGE_TARGETS}' (use --all, --claude-only, or --agents-only)."
-        exit 1 ;;
-esac
+AUTONOMOUS_MODE=0
+if [ "${AGY_BRIDGE_AUTONOMOUS:-}" = "1" ]; then AUTONOMOUS_MODE=1; fi
+
+for arg in "$@"; do
+    case "$arg" in
+        --claude|--claude-only|claude|CLAUDE.md)
+            TARGET_DOCS=("CLAUDE.md") ;;
+        --agents|--agents-only|--codex|agents|codex|AGENTS.md)
+            TARGET_DOCS=("AGENTS.md") ;;
+        --all|all|"CLAUDE.md,AGENTS.md"|"")
+            TARGET_DOCS=("CLAUDE.md" "AGENTS.md") ;;
+        --autonomous|--auto|-a)
+            AUTONOMOUS_MODE=1 ;;
+        *)
+            echo "[ERROR] Unknown target option: '$arg' (use --all, --claude-only, --agents-only, or --autonomous)."
+            exit 1 ;;
+    esac
+done
+if [ -n "${AGY_BRIDGE_TARGETS:-}" ]; then
+    case "$AGY_BRIDGE_TARGETS" in
+        --claude|--claude-only|claude|CLAUDE.md) TARGET_DOCS=("CLAUDE.md") ;;
+        --agents|--agents-only|--codex|agents|codex|AGENTS.md) TARGET_DOCS=("AGENTS.md") ;;
+        --all|all|"CLAUDE.md,AGENTS.md") TARGET_DOCS=("CLAUDE.md" "AGENTS.md") ;;
+    esac
+fi
 
 # 0. Make sure we're in a project directory. This directory becomes a trusted,
 #    writable workspace for agy, so refuse $HOME or / and confirm non-git folders.
@@ -77,10 +91,73 @@ SETTINGS_FILE="$SETTINGS_DIR/settings.json"
 # so the write rule must use the physical path.
 CURRENT_DIR="$REAL_DIR"
 
+if [ "$AUTONOMOUS_MODE" = "0" ] && [ -z "${AGY_BRIDGE_AUTONOMOUS:-}" ] && { exec 3< /dev/tty; } 2> /dev/null; then
+    echo "[MODE] Choose agy permission mode:"
+    echo "       [1] Standard Safe (Default): Harmless listing/git allowed; test tools added per project."
+    echo "       [2] Autonomous Mode: Auto-allows general commands (command(*)), strictly blocks rm/sudo/.env/agy."
+    printf "       Select [1/2] (Default: 1): "
+    read -r MODE_REPLY <&3 || MODE_REPLY=""
+    exec 3<&-
+    case "$MODE_REPLY" in
+        2|[aA]|autonomous|AUTONOMOUS) AUTONOMOUS_MODE=1 ;;
+    esac
+fi
+
 mkdir -p "$SETTINGS_DIR"
+
+# Offer this project's test commands once. They run project code and the rule is global,
+# so the default is No. AGY_BRIDGE_ALLOW_TESTS=1 accepts without asking, =0 skips; with no
+# terminal to ask, they are skipped.
+has() { [ -e "$CURRENT_DIR/$1" ]; }
+FOUND_CMDS=()
+if has package.json; then
+    if has pnpm-lock.yaml; then FOUND_CMDS+=("pnpm test")
+    elif has yarn.lock; then FOUND_CMDS+=("yarn test")
+    else FOUND_CMDS+=("npm test"); fi
+fi
+if has pyproject.toml || has pytest.ini || has setup.py || has tox.ini; then FOUND_CMDS+=("pytest" "python -m pytest"); fi
+if has Cargo.toml; then FOUND_CMDS+=("cargo test"); fi
+if has go.mod; then FOUND_CMDS+=("go test" "go vet"); fi
+if has pom.xml; then FOUND_CMDS+=("mvn test"); fi
+if has Makefile; then FOUND_CMDS+=("make test"); fi
+if compgen -G "$CURRENT_DIR/*.sln" > /dev/null || compgen -G "$CURRENT_DIR/*.csproj" > /dev/null; then FOUND_CMDS+=("dotnet test"); fi
+TEST_CMDS=()
+if [ "${#FOUND_CMDS[@]}" -gt 0 ]; then
+    for c in "${FOUND_CMDS[@]}"; do
+        # Skip rules that are already allowed, so re-running setup doesn't ask again.
+        if [ -f "$SETTINGS_FILE" ] && grep -qF "\"command($c)\"" "$SETTINGS_FILE"; then continue; fi
+        TEST_CMDS+=("$c")
+    done
+fi
+APPROVED_TEST_CMDS=""
+if [ "${#TEST_CMDS[@]}" -gt 0 ] && [ "$AUTONOMOUS_MODE" = "0" ] && ! grep -qF '"command(*)"' "$SETTINGS_FILE" 2>/dev/null; then
+    joined="$(printf '%s, ' "${TEST_CMDS[@]}")"
+    joined="${joined%, }"
+    echo "[INFO] Test commands found for this project: $joined"
+    echo "       Allowing them lets agy run your tests in headless mode. They run project code,"
+    echo "       and like every allow rule they apply to all projects (settings.json is global)."
+    allow_tests="no"
+    if [ "${AGY_BRIDGE_ALLOW_TESTS:-}" = "1" ]; then
+        allow_tests="yes"
+    elif [ "${AGY_BRIDGE_ALLOW_TESTS:-}" != "0" ] && { exec 3< /dev/tty; } 2> /dev/null; then
+        printf "       Allow agy to run them? [y/N] "
+        read -r REPLY <&3 || REPLY=""
+        exec 3<&-
+        case "$REPLY" in
+            [yY]|[yY][eE][sS]) allow_tests="yes" ;;
+        esac
+    fi
+    if [ "$allow_tests" = "yes" ]; then
+        APPROVED_TEST_CMDS="$(printf '%s\n' "${TEST_CMDS[@]}")"
+        echo "[OK] Allowing: $joined"
+    else
+        echo "[INFO] Skipped. Add them later with scripts/allow.sh (README: Allowing more commands), e.g."
+        echo "       bash scripts/allow.sh \"${TEST_CMDS[0]}\""
+    fi
+fi
 echo "[INFO] Updating permissions and trusted workspaces in $SETTINGS_FILE..."
 
-python3 - "$SETTINGS_FILE" "$CURRENT_DIR" "$LOGICAL_DIR" << 'EOF'
+_AGY_BRIDGE_TEST_CMDS="$APPROVED_TEST_CMDS" _AGY_BRIDGE_AUTONOMOUS="$AUTONOMOUS_MODE" python3 - "$SETTINGS_FILE" "$CURRENT_DIR" "$LOGICAL_DIR" << 'EOF'
 import json, os, shutil, sys, time
 
 file_path = sys.argv[1]
@@ -123,21 +200,29 @@ for key, value in (("permissions.allow", allow), ("permissions.deny", deny), ("t
         abort(f'"{key}" in settings.json must be an array.')
 
 # Rules are prefix matches ('command(ls)' also allows 'ls -la'); a trailing ' *' does not
-# work (verified on agy, see README). Read-only commands only. Anything that executes project code (pytest, make, ...)
-# or reads file contents (cat, rg, ...) is opt-in; see README "How to Add CLI Skills".
+# work (verified on agy, see README). Defaults never print file contents: listing, locating, git.
+# Anything that executes project code (pytest, make, ...) or reads file contents (cat, rg, ...)
+# is opt-in: see the project test prompt above and scripts/allow.sh (README "Allowing more commands").
+# Every allow rule is global: it applies to all projects that use this settings.json.
 # File writes are allowed only inside this project directory (trustedWorkspaces alone
 # does not grant write_file in headless mode; "write_file(*)" would allow any path).
 # Write rule only for the physical path (agy resolves symlinks first); the logical
 # path is still trusted, which experiments showed works when entering via a symlink.
 default_allow = [f"write_file({workspaces[0].rstrip('/')}/)",
     "command(ls)",
-    "command(git)"
+    "command(git)",
+    "command(pwd)",
+    "command(tree)",
+    "command(which)",
+    # Test commands the user just approved (see the prompt before this Python block).
+    *[f"command({c})" for c in os.environ.get("_AGY_BRIDGE_TEST_CMDS", "").split("\n") if c],
 ]
 default_deny = [
     "command(rm -rf)",
     "command(sudo)",
     "command(git push --force)",
     "command(git push -f)",
+    "command(agy)",
     "write_file(.git/)",
     "read_file(.env)"
 ]
@@ -145,6 +230,12 @@ default_deny = [
 for item in default_allow:
     if item not in allow:
         allow.append(item)
+
+if os.environ.get("_AGY_BRIDGE_AUTONOMOUS") == "1":
+    if "command(*)" not in allow:
+        allow.append("command(*)")
+    print("[OK] Autonomous Mode enabled: 'command(*)' added to permissions.allow.")
+    print("     agy can run general commands freely. High-risk commands (rm, sudo, .env, agy) remain strictly blocked in deny.")
 
 for item in default_deny:
     if item not in deny:
@@ -168,12 +259,12 @@ EOF
 RULES_FILE="$(mktemp)"
 trap 'rm -f "$RULES_FILE"' EXIT
 cat > "$RULES_FILE" << 'AGY_RULES_EOF'
-<!-- agy-bridge:start v5 -->
+<!-- agy-bridge:start v6 -->
 ## Delegating Tasks to Antigravity (agy)
 
 > **Role & Self-Recursion Guard:**
-> - **If you ARE the outer coding agent** (Claude Code, Codex CLI, OpenCode, Grok, Cursor, Windsurf, etc.): **Delegate by default** whenever a task reads, summarizes, searches, reviews, tests, or edits **3 or more files** (or the whole repository), even if the user did not explicitly mention `agy`. Keep only architectural decisions, unknown-cause debugging, and 1–2 file quick edits for yourself.
-> - **If you ARE Antigravity (`agy`) executing a task:** Never invoke `agy`. Use your built-in `read_file`, `edit_file`, and `write_file` tools for all file operations. When calling `run_command`, **NEVER use pipes (`|`), chains (`&&`, `;`), redirection (`>`), or `$()`** because headless permission checks block all compound commands (e.g., `Get-ChildItem | Select-Object` is denied). Run single allowlisted commands only: `git ls-files`, `git status`, `git diff`, `Get-ChildItem -Recurse -File -Name`, `ls -R`, `dir`.
+> - **If you ARE the outer coding agent** (Claude Code, Codex CLI, OpenCode, Grok, Cursor, Windsurf, etc.): **Delegate by default** whenever a task reads, summarizes, searches, reviews, tests, or edits **3 or more files** (or the whole repository), even if the user did not explicitly mention `agy`. Keep only architectural decisions, unknown-cause debugging, and 1-2 file quick edits for yourself.
+> - **If you ARE Antigravity (`agy`) executing a task:** Never invoke `agy`. Use your built-in `read_file`, `edit_file`, and `write_file` tools for all file operations. When calling `run_command`, **NEVER use pipes (`|`), chains (`&&`, `;`), redirection (`>`), or `$()`** because headless permission checks block all compound commands (e.g., `Get-ChildItem | Select-Object` is denied). Run single allowlisted commands only: `git ls-files`, `git status`, `git diff`, `Get-ChildItem -Recurse -File -Name`, `ls -R`, `dir`, `pwd`, `tree`.
 
 ### 1. Dynamic Model Selection (Workload-Based Tiering)
 Never hardcode deprecated model IDs. Select the model dynamically based on task complexity:
@@ -215,7 +306,7 @@ Quota groups can change, so never hardcode which models share a quota. Read it f
    - `[agy] print timeout after ...; returning partial output` in `stderr` means the run was cut off. `status` is still `SUCCESS` and the exit code is 0, but treat it as a failure: review `git diff` for half-applied edits and ask the user how to continue (e.g. resume with `--conversation <conversation_id>`).
    - If a shell call times out anyway, check for a live `agy` process and review `git status` before doing anything else. Never start a second `agy` run on the same tree while one is running.
 4. **Error & Quota Fallback (CRITICAL):**
-   - Only adopt `response` when JSON `status` is `SUCCESS` **and** `response` is non-empty. An empty `response`, a non-empty `denied_actions`, or a `no output produced — a tool required the "..." permission` message in `stderr` means the task was soft-denied: treat it as a failure, do not adopt it, and tell the user which rule (e.g. `command(...)` or `write_file(...)`) needs to be added to `permissions.allow`.
+   - Only adopt `response` when JSON `status` is `SUCCESS` **and** `response` is non-empty. An empty `response`, a non-empty `denied_actions`, or a `no output produced` / `a tool required the "..." permission` message in `stderr` means the task was soft-denied: treat it as a failure and do not adopt it. Tell the user the exact command that was denied and how to allow it safely: `bash scripts/allow.sh "<command>"` (macOS / Linux / WSL) or `.\scripts\allow.ps1 "<command>"` (Windows) from the agy-bridge repo; its README section "Allowing more commands" has one-line versions that need no checkout. Suggest the narrowest prefix that works (e.g. `npm test`, not `npm`). Never run the helper or edit `settings.json` yourself: widening `agy`'s permissions is the user's decision.
    - **Quota exhaustion** is a "Quota Exceeded", "429", "RESOURCE_EXHAUSTED", "quota reached", "usage limit" or "rate limit" message in `stderr`, `response` or `error` (JSON `status` `ERROR`), or a group with `remaining_fraction` 0 in `/usage` (section 1b). Run `/usage` to see which group is exhausted; do not guess from the error text.
    - **Switching models is allowed** because it only uses `agy` quota, not your own. If the failed run left the tree unchanged (compare `git status --short` or the file list with how it looked just before the call; files that already existed then, such as `TASK.md` or an untracked `CLAUDE.md` or `AGENTS.md`, do not count), retry the same task **once** with a same-tier model from a group that is not exhausted, and tell the user which model was used instead and why. If the failed run changed files, stop and ask the user instead of retrying. Do not send more work to an exhausted group for the rest of the session.
    - If **every group** is exhausted, or the retry fails: stop immediately and report, for each group, its name, which limit it hit (5-hour or weekly), `remaining_fraction` and `reset_time` (convert to the user's local time). **DO NOT** automatically fall back to executing the large batch task yourself; ask for the user's explicit decision (wait for the quota to refresh, or proceed using your own quota).
@@ -271,3 +362,5 @@ echo "------------------------------------------------------------------------"
 echo "[DONE] Setup complete."
 echo "[NEXT] If you haven't logged in yet, run 'agy' once to authenticate,"
 echo "       then type '/exit' to return to your shell."
+echo "[TIP]  agy may run listing / git commands headless. To allow more (tests, rg, ...), use"
+echo "       scripts/allow.sh from this repo; see README 'Allowing more commands'."

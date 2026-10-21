@@ -20,10 +20,12 @@ jobs:
         run: bash scripts/check-rules-sync.sh
       - name: Claude PreToolUse guard hook unit tests
         run: bash scripts/test-agy-guard.sh
+      - name: Allow script unit tests (Unix)
+        run: bash scripts/test-allow.sh
       - name: PowerShell syntax
         shell: pwsh
         run: |
-          foreach ($f in "setup.ps1", "scripts/verify.ps1") {
+          foreach ($f in "setup.ps1", "scripts/verify.ps1", "scripts/allow.ps1", "scripts/test-allow.ps1") {
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile("$PWD/$f", [ref]$null, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error "${f}: $($_.Message)" }; exit 1 }
@@ -144,6 +146,7 @@ jobs:
 
           Must-Pass $setup
           Must-Pass $verify
+          Must-Pass (Join-Path $env:GITHUB_WORKSPACE "scripts\test-allow.ps1")
           "--- second run must be idempotent"
           Must-Pass $setup
           Must-Pass $verify

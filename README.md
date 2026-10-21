@@ -153,7 +153,7 @@ Every line is `PASS`, `WARN` or `FAIL`; the exit code is the number of `FAIL` li
 Start `claude`, `codex`, `opencode`, or your `AGENTS.md`-compatible IDE agent inside a project you ran setup in. Claude Code reads `CLAUDE.md`, while Codex CLI, OpenCode (Grok / DeepSeek / etc.), Cursor, Windsurf, Cline, and Copilot read `AGENTS.md`. Bulk work (many-file edits, unit tests, repo-wide searches, code reviews) is a good fit; architecture decisions and small edits stay with your outer agent. It is guidance, not a guarantee: to be sure, say so explicitly, e.g. "Delegate this to agy according to CLAUDE.md / AGENTS.md". By default `agy` may only run read-only commands such as `ls` and `git status`; see the "How to Add CLI Skills" tutorial below to allow more.
 
 > [!IMPORTANT]
-> **Cross-Agent Pitfalls Already Handled in `v5` Rules (and What to Watch For):**
+> **Cross-Agent Pitfalls Already Handled in `v6` Rules (and What to Watch For):**
 > 1. **OpenAI Codex CLI Sandbox (`workspace-write`):** Codex runs shell commands in an offline Seatbelt/Landlock sandbox by default, which blocks `agy` from reaching Google's API and writing session/auth state to `~/.gemini/antigravity-cli`. The `v5` rules instruct Codex to request escalated permissions (`sandbox_permissions: "require_escalated"`) for `agy` calls; approve the prompt when Codex asks, or run Codex with network/home access enabled for `agy`.
 > 2. **Self-Recursion Prevention:** Because `agy` runs in the same project root, it could read `AGENTS.md` / `CLAUDE.md` itself. Both `permissions.allow` (which omits `command(agy)`) and an explicit orchestrator-only header in `v5` prevent `agy` from recursively calling itself.
 > 3. **Shell Quoting on Windows PowerShell vs Bash:** Agents on Windows (Codex, Cursor) often invoke PowerShell instead of Bash. Rule 2 instructs agents to write multi-line or quote-heavy specs to `TASK.md` first rather than escaping inline strings.
@@ -175,16 +175,79 @@ In this Manager-Worker architecture, split your tool integrations based on their
    - **Examples:** `jq` (JSON processor), `ripgrep` (`rg` for fast search), `cargo` / `go` / `pytest` / `cmake` (build & test runners).
    - **Why:** These are local execution tools for the worker. `agy` can invoke any system CLI tool as a skill in headless mode _only if_ it is explicitly allowlisted in `settings.json`.
 
-### Tutorial: How to Add CLI Skills to the `agy` Allowlist
+### Tutorial: Allowing More Commands Safely (CLI Skills & Tests)
 
 In headless mode (`agy -p`), `agy` cannot display interactive permission prompts:
 
 - **File reads** are allowed. **File writes** need a `write_file(...)` allow rule even inside `trustedWorkspaces` (tested). The setup script adds one scoped to your project directory; `write_file(*)` would also allow writes outside the project, so avoid it.
 - **Shell commands** default to `Ask` and are **soft-denied** in headless mode (skipped and logged to `stderr`, even though the exit code is `0`).
 
-Claude Code **cannot** bypass `agy`'s internal permission checks for you. To grant `agy` the skill to run tools like `rg` (`ripgrep`), `jq`, or `cargo test`, add them to `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` (on Windows: `$HOME\.gemini\antigravity-cli\settings.json`):
+#### 1. What Is Allowed by Default?
+`setup.sh` and `setup.ps1` configure safe defaults that inspect project structure without printing file contents or running arbitrary code:
+- **Directory listing:** `ls`, `dir`, `Get-ChildItem`, `tree`
+- **Location & tool lookup:** `pwd`, `Get-Location`, `which`, `where.exe`, `Get-Command`, `Test-Path`
+- **Git operations:** `git` (allows `git status`, `git diff`, `git ls-files`, `git log`)
+- **Project file writing:** restricted to your project root.
 
-> **Defaults are read-only.** `setup.sh` / `setup.ps1` only allow directory listing (`ls`; `dir` / `Get-ChildItem` on Windows), `git status/diff/log`, and file writes inside your project directory. Commands that run project code (`pytest`, `make`, `npm`) or read file contents (`cat`, `rg`, `jq`) are opt-in, because `read_file(.env)` in `deny` does not stop `command(cat .env)`. Add them below only for projects you trust.
+During setup, the script automatically scans for project files (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`, `Makefile`, `.sln`/`.csproj`) and prompts once to allow your test runner (`npm test`, `pytest`, `cargo test`, etc.).
+
+#### 2. Adding Commands with the Safe Helper (Recommended)
+Claude Code and external agents **cannot** approve permission prompts inside `agy`. To grant `agy` the skill to run tools like `rg` (ripgrep), `jq`, or project test runners without manually editing JSON (avoiding UTF-8 BOM, trailing commas, or syntax errors), use `scripts/allow.sh` / `scripts/allow.ps1`:
+
+```bash
+# macOS / Linux / WSL
+bash scripts/allow.sh "npm test" pytest
+bash scripts/allow.sh --list
+bash scripts/allow.sh --remove pytest
+
+# Windows (PowerShell)
+.\scripts\allow.ps1 "npm test" pytest
+.\scripts\allow.ps1 --list
+.\scripts\allow.ps1 --remove pytest
+```
+
+Without cloning the repository (one-line command):
+```bash
+# macOS / Linux / WSL
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/scripts/allow.sh | bash -s -- "npm test"
+
+# Windows (PowerShell)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/scripts/allow.ps1))) "npm test"
+```
+
+**Built-in Safety Checks:**
+- **Refuses dangerous commands:** Blocks file deletion (`rm`, `del`, `Remove-Item`), privilege escalation (`sudo`, `runas`), remote download/execution (`curl`, `wget`, `irm`), and `agy` (prevents runaway self-recursion).
+- **Refuses shell operators:** Blocks compound commands with `|`, `&&`, `;`, `>`, or `$()`, which headless permission checks block anyway.
+- **Refuses bare interpreters:** Forbids broad execution commands (`python`, `bash`, `node`) on their own, while allowing specific subcommands (`python -m pytest`).
+- **Cautions on file content readers:** Warns before allowlisting `cat`, `rg`, `jq`, `Get-Content`, `Select-String`, because `read_file(.env)` in `deny` only stops `agy`'s built-in file reader tool, not shell commands. Use `--yes` to confirm without a terminal.
+
+#### 3. Autonomous Mode vs Standard Safe Mode
+If you want `agy` to run completely unattended without prompting or soft-denying build tools and test runners:
+
+- **Activate Autonomous Mode (`command(*)`)**:
+  ```bash
+  # macOS / Linux / WSL
+  bash scripts/allow.sh --autonomous
+  # or pass flag during initial setup: bash setup.sh --autonomous
+
+  # Windows (PowerShell)
+  .\scripts\allow.ps1 --autonomous
+  # or pass flag during initial setup: .\setup.ps1 --autonomous
+  ```
+  Grants `agy` freedom to run general CLI tools, build runners, and test suites automatically in headless mode. High-risk commands (`rm -rf`, `sudo`, `git push -f`, reading `.env`, calling `agy` itself) remain **strictly blocked** by `permissions.deny` because Antigravity enforces `Deny > Ask > Allow`.
+
+- **Restore Strict Safe Mode**:
+  ```bash
+  # macOS / Linux / WSL
+  bash scripts/allow.sh --strict
+
+  # Windows (PowerShell)
+  .\scripts\allow.ps1 --strict
+  ```
+  Removes `command(*)` and restores granular, explicit allowlisting.
+
+#### 4. Manual Configuration (`settings.json`)
+If you prefer editing manually, open `~/.gemini/antigravity-cli/settings.json` (Windows: `$HOME\.gemini\antigravity-cli\settings.json`):
 
 ```json
 {

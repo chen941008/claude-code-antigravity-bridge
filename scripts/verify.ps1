@@ -4,7 +4,7 @@
 # It never calls a model, so it costs no quota. The exit code is the number of FAIL lines.
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI.
 $ErrorActionPreference = "Continue"
-$ExpectedRules = "v5"
+$ExpectedRules = "v6"
 $ProjectDir = (Get-Location).ProviderPath.TrimEnd('\')
 $Settings = Join-Path $HOME ".gemini\antigravity-cli\settings.json"
 $TargetArg = if ($args.Count -gt 0 -and $args[0]) { [string]$args[0] } elseif ($env:AGY_BRIDGE_TARGETS) { $env:AGY_BRIDGE_TARGETS } else { "all" }
@@ -75,6 +75,24 @@ if ($Data) {
         $Rule = "write_file($ProjectDir\)"
         Check (@($Allow) -contains $Rule) "write rule for this project: $Rule"
         Check (@($Trusted) -contains $ProjectDir) "project is a trusted workspace"
+        if (@($Allow) -contains "command(*)") {
+            "INFO  agy is in Autonomous Mode (command(*)): general commands run freely without soft-denials."
+            "INFO  High-risk operations are guarded by permissions.deny."
+        } else {
+            $Cmds = @(@($Allow) | Where-Object { "$_" -match '^command\(.*\)$' } | ForEach-Object { "$_" -replace '^command\((.*)\)$', '$1' })
+            "INFO  agy may run these commands headless: $($Cmds -join ', ')"
+            "INFO  To allow more (tests, rg, ...): .\scripts\allow.ps1 `"<command>`" or .\scripts\allow.ps1 --autonomous"
+        }
+        foreach ($R in @($Allow)) {
+            $S = "$R"
+            if ($S -eq "write_file(*)") {
+                Warn "risky allow rule: write_file(*) allows writes outside the project directory"
+            } elseif ($S -match '^command\(.*\*.*\)$' -and $S -ne "command(*)") {
+                Warn "risky allow rule: $S ('*' allows far more than intended; rules are already prefix matches)"
+            } elseif ($S -match '^command\((.*[\\/])?agy(\.exe)?( .*)?\)$') {
+                Warn "allow rule $S lets agy call itself; remove it with: .\scripts\allow.ps1 --remove `"$($S -replace '^command\((.*)\)$', '$1')`""
+            }
+        }
         foreach ($R in "write_file(.git/)", "read_file(.env)") {
             Check (@($Deny) -contains $R) "deny rule present: $R"
         }

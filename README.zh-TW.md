@@ -153,7 +153,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 在跑過 setup 的專案裡啟動 `claude`、`codex`、`opencode` 或其他支援 `AGENTS.md` 的 AI 工具。Claude Code 會讀 `CLAUDE.md`；而 OpenAI Codex CLI、OpenCode（常接 Grok / DeepSeek 等）、Cursor、Windsurf、Cline、Copilot 則會自動讀 `AGENTS.md`。批次工作（改很多檔、補單元測試、全專案搜尋、code review）很適合外包；架構決策與小改動則留給上層 AI 自己處理。這是引導而不是保證：想確保的話，直接說「這個請依據 CLAUDE.md / AGENTS.md 外包給 agy」。預設 `agy` 只能執行 `ls`、`git status` 這類唯讀指令，要放行更多請看下方「如何新增 CLI 技能」教學。
 
 > [!IMPORTANT]
-> **跨 AI 平台（Codex / Grok / OpenCode / Windows）細微差異與避坑重點（已內建於 `v5` 規則）：**
+> **跨 AI 平台（Codex / Grok / OpenCode / Windows）細微差異與避坑重點（已內建於 `v6` 規則）：**
 > 1. **OpenAI Codex CLI 的預設沙盒攔截（Seatbelt / Landlock）**：Codex CLI 預設在 `workspace-write` 沙盒中執行指令，**預設斷網且禁止寫入 `$HOME/.gemini/antigravity-cli`**，會導致 `agy` 無法連線或寫入 session/token。`v5` 規則已明確指示 Codex 在呼叫 `agy` 時必須請求跳出沙盒（`sandbox_permissions: "require_escalated"`）；當 Codex 跳出權限詢問時請點選允許。
 > 2. **防止 `agy` 讀到 `AGENTS.md` 自我遞迴（Self-Recursion）**：因為 `agy` 也是在同一個專案目錄下執行，若它自己讀到 `AGENTS.md` / `CLAUDE.md` 可能會誤以為自己也要去呼叫 `agy`。本專案透過雙重防護避免遞迴：`settings.json` 白名單不放行 `command(agy)`，且 `v5` 規則開頭明定若執行者本身就是 `agy` 則忽略該區塊。
 > 3. **Windows PowerShell vs Bash 引號與跳脫字元差異**：在 Windows 上，Codex CLI 與 Cursor 預設常呼叫 PowerShell，而 Claude Code 預設呼叫 Git Bash。`v5` 規則第 2 點強制要求多行或含引號／特殊字元的複雜指令一律先寫入 `TASK.md` 再交由 `agy` 讀取，徹底避開跨 Shell 的引號跳脫問題。
@@ -175,16 +175,79 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
    - **範例**：`jq`（解析 JSON）、`ripgrep`（`rg` 極速搜尋）、`cargo` / `go` / `pytest` / `cmake`（編譯與測試工具）。
    - **原因**：這些是給外包人員幹活用的本地工具。只要安裝在系統上，並寫入 `settings.json` 白名單，`agy` 在無頭模式下就能毫無阻礙地呼叫它們。
 
-### 教學：如何將 CLI 技能加入 `agy` 白名單？
+### 教學：如何安全地放行更多指令（CLI 技能與測試）
 
 在無頭模式（`agy -p`）下，`agy` 無法跳出互動視窗詢問權限：
 
 - **檔案讀取**：允許。**檔案寫入**即使在 `trustedWorkspaces` 內，也需要 `write_file(...)` 白名單規則（實測結果）。設定腳本會加入一條僅限你專案目錄的規則；`write_file(*)` 會連專案外的路徑也放行，請避免使用。
 - **Shell 外部指令**：預設為 `Ask`，在無頭模式下會被**「軟拒絕」**（結束碼雖為 0，但指令會被跳過不執行，並於 `stderr` 輸出警告）。
 
-Claude Code **無法**幫你繞過 `agy` 的內部權限限制。若你想賦予 `agy` 使用 `rg` (ripgrep)、`jq` 或 `cargo test` 等技能，請手動將它們加入 `~/.gemini/antigravity-cli/settings.json`（Windows 為 `$HOME\.gemini\antigravity-cli\settings.json`）的 `permissions.allow` 清單中（優先順序為 **Deny > Ask > Allow**）：
+#### 1. 預設放行了哪些安全指令？
+`setup.sh` 與 `setup.ps1` 預設配置了僅列出目錄結構與檢查位置的無害指令（不會印出檔案內容、亦不執行未授權程式碼）：
+- **列出目錄與檔案**：`ls`、`dir`、`Get-ChildItem`、`tree`
+- **位置與工具路徑檢查**：`pwd`、`Get-Location`、`which`、`where.exe`、`Get-Command`、`Test-Path`
+- **Git 版本控制**：`git`（放行 `git status`、`git diff`、`git ls-files`、`git log`）
+- **檔案寫入**：嚴格限制在當前專案根目錄內。
 
-> **預設只放行唯讀指令。** `setup.sh` / `setup.ps1` 只放行列目錄（`ls`；Windows 為 `dir` / `Get-ChildItem`）、`git status/diff/log`，以及專案目錄內的檔案寫入。會執行專案程式碼的指令（`pytest`、`make`、`npm`）或能讀檔案內容的指令（`cat`、`rg`、`jq`）需自行加入，因為 `deny` 裡的 `read_file(.env)` 擋不住 `command(cat .env)`。請只在信任的專案加入。
+在執行 setup 腳本時，系統會自動偵測專案類型（Node.js `package.json`、Python `pytest`/`pyproject.toml`、Rust `Cargo.toml`、Go `go.mod`、Java `pom.xml`、Makefile、.NET `.sln`/`.csproj`）並主動詢問一次是否授權執行該專案的測試指令（如 `npm test`、`pytest` 等）。
+
+#### 2. 使用安全小幫手放行更多指令（推薦做法）
+外部 AI（如 Claude Code、Codex）無法幫你在終端機點擊確認。為了讓你輕鬆擴充 `rg` (ripgrep)、`jq` 或自訂測試工具，又不必手動編輯 JSON（避免手殘搞砸 UTF-8 BOM、漏打括號或留下非法註解），專案提供了 `scripts/allow.sh` / `scripts/allow.ps1`：
+
+```bash
+# macOS / Linux / WSL
+bash scripts/allow.sh "npm test" pytest
+bash scripts/allow.sh --list
+bash scripts/allow.sh --remove pytest
+
+# Windows (PowerShell)
+.\scripts\allow.ps1 "npm test" pytest
+.\scripts\allow.ps1 --list
+.\scripts\allow.ps1 --remove pytest
+```
+
+未下載本專案時（單行指令直接執行）：
+```bash
+# macOS / Linux / WSL
+curl -fsSL https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/scripts/allow.sh | bash -s -- "npm test"
+
+# Windows (PowerShell)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/chen941008/claude-code-antigravity-bridge/v1.3.0/scripts/allow.ps1))) "npm test"
+```
+
+**小幫手的安全防護機制：**
+- **嚴格攔截高風險指令**：禁止刪除（`rm`、`del`、`Remove-Item`）、提權（`sudo`、`runas`）、外部下載執行（`curl`、`wget`、`irm`），以及 `agy` 本身（徹底杜絕遞迴死鎖）。
+- **嚴格攔截 Shell 運算子**：包含管道（`|`）、串接（`&&`、`;`）、重定向（`>`）或指令替換（`$()`），因為無頭權限檢查本就會阻擋複合指令。
+- **攔截裸直譯器**：禁止單獨放行 `python`、`bash`、`node` 等可任意執行程式碼的直譯器，但允許具體子指令前綴（如 `python -m pytest`）。
+- **印出檔案內容工具主動警示**：若欲加入 `cat`、`rg`、`jq`、`Get-Content`、`Select-String` 等能讀取檔案內容的工具，小幫手會主動提醒：`deny` 裡的 `read_file(.env)` 擋不住 shell 指令印出 `.env`，並請你二次確認（腳本自動化可用 `--yes` 跳過確認）。
+
+#### 3. 一鍵切換模式：全自動自主模式 vs 標準安全模式
+如果你希望 `agy` 像個獨立工程師一樣全自動幹活，完全不被未設定的編譯、測試或分析工具中斷軟拒絕：
+
+- **啟用全自動自主模式 (`command(*)`)**：
+  ```bash
+  # macOS / Linux / WSL
+  bash scripts/allow.sh --autonomous
+  # 或在安裝時直接帶參數：bash setup.sh --autonomous
+
+  # Windows (PowerShell)
+  .\scripts\allow.ps1 --autonomous
+  # 或在安裝時直接帶參數：.\setup.ps1 --autonomous
+  ```
+  放行所有一般指令（自動寫入 `command(*)`），`agy` 在無頭模式下不再觸發軟拒絕；高危險操作（刪庫 `rm -rf`、提權 `sudo`、強推 `git push -f`、讀取 `.env` 機密、呼叫 `agy` 遞迴）**依然被 `permissions.deny` 絕對防死**（Antigravity 規則遵循 `Deny > Ask > Allow` 絕對防護原則）。
+
+- **一鍵切回嚴格安全模式**：
+  ```bash
+  # macOS / Linux / WSL
+  bash scripts/allow.sh --strict
+
+  # Windows (PowerShell)
+  .\scripts\allow.ps1 --strict
+  ```
+  立即移除 `command(*)`，回到精確白名單審查狀態。
+
+#### 4. 手動編輯設定檔 (`settings.json`)
+若偏好手動編輯，開啟 `~/.gemini/antigravity-cli/settings.json`（Windows 為 `$HOME\.gemini\antigravity-cli\settings.json`）：
 
 ```json
 {

@@ -16,7 +16,14 @@ def block(path, unescape):
     return out.replace("``", "`") if unescape else out
 
 sh = block("setup.sh", False)
-ps = block("setup.ps1", True)
+# setup.ps1 holds the block in a literal @'...'@ here-string, so it must match byte for byte
+# (an expandable @"..."@ once turned `$()` into an empty string).
+ps = block("setup.ps1", False)
+# Windows PowerShell 5.1 reads BOM-less scripts as ANSI, so non-ASCII text in setup.ps1
+# would be written into CLAUDE.md / AGENTS.md as mojibake (e.g. an en dash became "??").
+bad = sorted({c for c in sh if ord(c) > 127})
+if bad:
+    sys.exit("Rules block must be ASCII-only; found: " + " ".join("U+%04X" % ord(c) for c in bad))
 if sh != ps:
     sys.stderr.write("".join(difflib.unified_diff(
         sh.splitlines(True), ps.splitlines(True), "setup.sh", "setup.ps1")))

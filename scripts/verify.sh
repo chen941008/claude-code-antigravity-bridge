@@ -4,7 +4,7 @@
 # It never calls a model, so it costs no quota. Exit code = number of FAIL lines.
 set -uo pipefail
 
-EXPECTED_RULES="v5"
+EXPECTED_RULES="v6"
 PROJECT_DIR="$(pwd -P)"
 SETTINGS="$HOME/.gemini/antigravity-cli/settings.json"
 TARGET_SPEC="${1:-${AGY_BRIDGE_TARGETS:-all}}"
@@ -91,6 +91,21 @@ if data is not None:
             (ok if rule in allow else bad)("write rule for this project: " + rule)
         if isinstance(trusted, list):
             (ok if project in trusted else bad)("project is a trusted workspace")
+        if isinstance(allow, list):
+            if "command(*)" in allow:
+                print("INFO  agy is in Autonomous Mode (command(*)): general commands run freely without soft-denials.")
+                print("INFO  High-risk operations are guarded by permissions.deny.")
+            else:
+                cmds = [m.group(1) for m in (re.fullmatch(r"command\((.*)\)", str(r)) for r in allow) if m]
+                print("INFO  agy may run these commands headless: " + ", ".join(cmds))
+                print('INFO  To allow more (tests, rg, ...): bash scripts/allow.sh "<command>" or bash scripts/allow.sh --autonomous')
+            for r in map(str, allow):
+                if r == "write_file(*)":
+                    print("WARN  risky allow rule: write_file(*) allows writes outside the project directory")
+                elif re.fullmatch(r"command\(.*\*.*\)", r) and r != "command(*)":
+                    print("WARN  risky allow rule: %s ('*' allows far more than intended; rules are already prefix matches)" % r)
+                elif re.fullmatch(r"command\((.*/)?agy( .*)?\)", r):
+                    print("WARN  allow rule %s lets agy call itself; remove it with: bash scripts/allow.sh --remove \"%s\"" % (r, r[8:-1]))
         if isinstance(deny, list):
             for r in ("write_file(.git/)", "read_file(.env)"):
                 (ok if r in deny else bad)("deny rule present: " + r)
@@ -105,8 +120,8 @@ for doc_name in target_docs:
         if raw_md.startswith(b"\xef\xbb\xbf"):
             bad(doc_name + " starts with a UTF-8 BOM")
         md = raw_md.decode("utf-8-sig")
-        starts = re.findall(r"^<!-- agy-bridge:start (v\d+) -->$", md, re.M)
-        ends = re.findall(r"^<!-- agy-bridge:end -->$", md, re.M)
+        starts = re.findall(r"^<!-- agy-bridge:start (v\d+) -->\r?$", md, re.M)
+        ends = re.findall(r"^<!-- agy-bridge:end -->\r?$", md, re.M)
         if len(starts) != 1 or len(ends) != 1:
             bad("%s must contain exactly one agy-bridge block (found %d start, %d end)" % (doc_name, len(starts), len(ends)))
         else:
