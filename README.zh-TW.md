@@ -332,24 +332,85 @@ _規則是以指令「前綴」比對：`"command(jq)"` 也會放行 `jq .name p
 
 ## 選用：用 PreToolUse Hook 強制執行規則
 
-`CLAUDE.md` 的規則只是建議，Claude 仍可能忘記。[`extras/claude-hook/agy_guard.py`](./extras/claude-hook/agy_guard.py) 是選用的 Claude Code hook，會在以下情況攔截無頭 `agy -p` 呼叫（exit code 2）：缺少 `--output-format json`、既沒有 `run_in_background` 也沒有 >= 600000 的 Bash `timeout`、前景呼叫缺少 `--print-timeout`，或同一個專案目錄仍有另一個無頭 `agy` 行程在執行（能讀到工作目錄時會忽略其他專案的行程，讀不到時保守地攔截）。請加入 `.claude/settings.json`：
+`CLAUDE.md` 的規則只是建議，Claude 仍可能忘記。[`extras/claude-hook/agy_guard.py`](./extras/claude-hook/agy_guard.py)（針對 `agy`）與 [`extras/claude-hook/grok_guard.py`](./extras/claude-hook/grok_guard.py)（針對 `grok`）是選用的 Claude Code hook，會在呼叫不符合安全規則時直接攔截（exit code 2）：
+
+- **`agy_guard.py`**：攔截缺少 `--output-format json`、既沒有 `run_in_background` 也沒有 >= 600000 的 Bash `timeout`、前景呼叫缺少 `--print-timeout`，或同一專案目錄仍有另一個無頭 `agy` 行程在執行的 `agy -p` 呼叫（能讀到工作目錄時會忽略其他專案的行程，讀不到時保守地攔截）。
+- **`grok_guard.py`**：先移除 POSIX Shell 註解（`#`）、以 `shlex` 拆解實際 token、遞迴解開 `bash -c` / `sh -c`，並攔截動態包裝與內嵌直譯器（`eval`、`$(...)`、反引號、`python3 -c`、`node -e`、`perl -e`），強制所有無頭 Grok 任務一律透過專案內的 `<專案>/.grok/grok-worker.py` 執行（拒絕直接呼叫 `grok -p` 以及 `/tmp/grok-worker.py` 等外部路徑，僅放行 0 成本的 `grok models` / `grok inspect`）。強制檢查 `--mode read-only|write`、禁止在唯讀模式降級 `--sandbox read-only`、限制 `--max-turns <1..120>` 與 `--wall-timeout <1..3600>`、攔截 `/usage` 與 `/cost` 付費 prompt、要求 `run_in_background` 或 `timeout >= 600000`，並以專案目錄鎖及 write 模式常駐不 unlink 的 `<專案>/.grok/worker.lock`（`fcntl.flock`）檢查併發，消除 `pgrep -f` 誤判與 inode 競爭條件。它也會解開 Shell 關鍵字（`then`、`{`、`!`）、`exec` 與 `env -S`；攔截任何把 `grok` 交給其他指令執行的寫法（`timeout 60 grok`、`sudo grok`、`find -exec grok`、`watch 'grok -p ...'`、`G=grok`），但仍放行 `which grok`、`grep grok` 這類查詢；並要求 worker 必須針對專案根目錄執行（不得以 `--cwd`、`cd`、`pushd` 或 `env -C` 改到別處）。它是給遵守規則的 agent 用的靜態預檢，不是沙箱：執行時才組出來的指令（`g=gr; ${g}ok`）或先寫進腳本檔再執行的指令，都不在它能檢查的範圍內。
+
+可將其中一個或兩個都加入 `.claude/settings.json`：
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "python3 /path/to/extras/claude-hook/agy_guard.py" }] }
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "python3 /path/to/extras/claude-hook/agy_guard.py" },
+          { "type": "command", "command": "python3 /path/to/extras/claude-hook/grok_guard.py" }
+        ]
+      }
     ]
   }
 }
 ```
 
-遇到非預期輸入一律放行，因此 hook 本身的 bug 不會讓你無法使用 Bash。可用 `bash scripts/test-agy-guard.sh` 離線測試。
+遇到非預期輸入一律放行，因此 hook 本身的 bug 不會讓你無法使用 Bash。可用 `bash scripts/test-agy-guard.sh` 與 `bash scripts/test-grok-guard.sh` 離線測試。
+
+---
+
+## 讓 Claude Code 呼叫 Grok Build (`grok`)（macOS / Linux / WSL）
+
+如果你也有 **xAI / SuperGrok** 訂閱（Grok Build CLI，`grok`），可以把 `grok` 設為第二個無頭外包工人——可以單獨安裝，也可以跟 `agy` 裝在同一個專案裡並存。
+
+### 快速開始（`setup-grok.sh`）
+
+在你的**專案根目錄**執行 [`setup-grok.sh`](./setup-grok.sh)：
+
+```bash
+bash setup-grok.sh
+```
+
+腳本會自動完成：
+1. 若 `PATH` 上找不到 `grok`，自動呼叫官方安裝腳本 `https://x.ai/cli/install.sh` 安裝至 `~/.grok/bin`。
+2. 將權限規則寫入**專案作用域**的 `<專案>/.grok/config.toml`（不再塞進全域 `~/.grok/config.toml`，避免多專案寫入權限隨時間累積），在 `~/.grok/trusted_folders.toml` 註冊專案資料夾信任，並自動將舊版遺留在全域 `~/.grok/config.toml` 的 `grok-bridge` 區塊清理遷移。專案設定只放行此專案實體路徑的 `Write(/實體路徑/**)`、`Edit(/實體路徑/**)`，並加入完整的敏感檔案 `deny` 保護（涵蓋 `.env` / `.env.*`、`*.pem`、`*.key`、`*.p12`、`*.pfx`、`*.keystore`、`*.jks`、`id_rsa*`、`id_ed25519*`、`id_ecdsa*`、`.ssh`、`.aws`、`.gnupg`、`.kube`、`.npmrc`、`.pypirc`、`.netrc`、`*credentials*.json`、`*secret*.json`，以及防止改動 `.git/**`、`.grok/**`、`.claude/**`）。
+3. 安裝 [`scripts/grok-worker.py`](./scripts/grok-worker.py) 至 `<專案>/.grok/grok-worker.py`（並建立 `<專案>/.grok/.gitignore` 寫入 `*` 以保持 `git status` 乾淨），同時在 `CLAUDE.md` 附加（或原地升級）`<!-- grok-bridge:start v2 -->` ... `<!-- grok-bridge:end -->` 規則區塊，完全不會動到你原本的專案規範或 `agy-bridge` 區塊。
+4. 當 `CLAUDE.md` 同時存在 `agy-bridge` 與 `grok-bridge` 區塊時，Claude 預設派工給 `agy`；當你點名要用 Grok，或 `agy` 無法接手（未安裝、未登入、或所有 `agy` 額度分組皆耗盡）時，Claude 會在每個 session 先用一句話徵得你同意後改派給 `grok`，絕不擅自吃掉 Claude 自己的額度。
+
+### 登入與自我檢查（`verify-grok.sh`）
+
+若尚未登入，請先執行 `grok login`（或執行一次 `grok` 後輸入 `/exit`）。接著在專案根目錄執行完全不耗額度的自我檢查：
+
+```bash
+bash scripts/verify-grok.sh
+```
+
+> [!WARNING]
+> **千萬不要在無頭模式執行 `grok -p "/usage"` 或 `grok -p "/cost"`。** 跟 `agy -p "/usage"`（在本地瞬間攔截、0 token）不同，無頭模式的 `grok` 會把 `/usage` 當成一般對話送給模型——實測單次會燒掉約 50 萬 tokens（約 \$0.28 美金），而且依然讀不到你的帳號剩餘額度（SuperGrok 額度只能在互動式 TUI 內輸入 `/usage` 查看）。檢查環境請一律用 `bash scripts/verify-grok.sh`（只呼叫本地的 `grok models` 與 `grok inspect`，0 成本）。
+
+### `grok-worker.py` 與 `grok -p` 無頭模式關鍵設計（基於 `grok 1.0.62`）
+
+- **為什麼統一透過 `python3 .grok/grok-worker.py` 啟動**：`grok-worker.py` 以 `subprocess.Popen(argv, shell=False, start_new_session=True)` 直接在 `argv` 層級強制注入 `--output-format json` 與 `--permission-mode dontAsk`（徹底杜絕 Shell `#` 註解或 `bash -c` 包裝繞過），以 `fcntl.flock` 原子鎖定專案目錄（write 模式另鎖定 `.grok/worker.lock`）防止併發競爭，並強制執行回合數上限（`--max-turns 1..120`）與真實執行時間上限（`--wall-timeout`，預設 `540` 秒，逾時自動以 `os.killpg` 終止整個子行程群組）。即使 Wrapper 本身被終止（包括 `SIGKILL`），在獨立 session 中的 watchdog 也會結束 `grok` 的行程群組，並在它結束前持續鎖住專案。
+- **依任務類型分離工具集與 OS Sandbox（`--mode read-only` vs `--mode write`）**：
+  - `--mode read-only` 自動帶入 `--tools read_file,grep,list_dir --sandbox read-only`，從工具集與作業系統沙盒雙重確保唯讀任務無法寫檔。
+  - `--mode write` 自動帶入 `--disallowed-tools run_terminal_cmd --sandbox strict`（多檔案修改可額外加 `--worktree <name>` 在獨立 Git worktree 執行）。
+- **Worktree 關聯驗證**：既有路徑、Grok 建立的 worktree，以及 Git fallback 目的地，都必須與來源 repository 的 Git common directory 相同，且實體路徑出現在 `git worktree list --porcelain -z`，才能寫入權限與資料夾信任。來源目錄本身不能作為隔離目標。既有 worktree 設定會先驗證，再逐位元保留，包括空的 allowlist、自訂 deny/ask；只有目標沒有設定時才繼承，初始化途中出現的設定也不會被覆蓋。不安全或無法解析的設定會拒絕執行；在 Python 3.9/3.10（沒有 `tomllib`）上，只有與 Wrapper 自行佈建內容完全相同的 worktree 設定可以沿用，驗證其他既有設定需要 Python 3.11+。原生 Grok 建立會帶入未提交變更；若失敗或未回傳可用路徑，Git fallback 只在來源沒有 staged、unstaged 或 untracked 變更時建立 detached HEAD worktree，否則明確報錯，不會替你 commit 或 stash。
+- **Worktree 內的任務檔**：兩種模式的 `--prompt-file` 都必須解析為 `--cwd` 專案內的一般檔案；外部路徑、`..` 越界與指向專案外的 symlink 都會在讀取前拒絕。需要外部任務時，先自行將已授權內容複製進專案。同時使用 `--worktree --prompt-file TASK.md` 時，Wrapper 會把已驗證的內容存成目標 worktree 內獨立的 `.grok/worker-prompt-*.md`，並把這個路徑交給 Grok，確保 `strict` sandbox 可讀取；JSON 任務會保留 `.json` 副檔名。執行結束後移除暫存副本，保留既有任務檔，來源檔也不會被改動。未追蹤的 `TASK.md` 同樣會觸發 Git fallback 的 dirty 拒絕條件。
+- **Read-only 初始化**：唯讀 Worker 不會繼承或建立專案權限設定、註冊資料夾信任，也不會建立 `.grok`、`.gitignore` 或鎖檔；改用既有專案目錄的核心鎖。Write Worker 共用這把目錄鎖，另保留 `.grok/worker.lock` 供狀態診斷及舊版協作，Grok guard 會檢查兩者。唯讀 Worker 也不會改寫既有鎖檔。Grok 自身仍可依唯讀 sandbox 規則在其家目錄寫入 session／執行期資料。
+- **無副作用的 `--dry-run`**：驗證參數、信任設定與既有 worktree 關聯，列印預期 CWD、argv 與初始化操作；即使直接從 linked worktree 執行，也不會建立 worktree、設定檔、prompt 副本、鎖檔或信任項目。尚未建立的 worktree 路徑與 prompt 暫存檔名會以佔位文字顯示。
+- **為什麼每次呼叫都強制帶 `--permission-mode dontAsk`**：在 `grok` 互動介面按 `Ctrl+O` 或輸入 `/always-approve`，會把 `permission_mode = "always-approve"` 寫進 `~/.grok/config.toml`。無頭呼叫強制帶上 `--permission-mode dontAsk` 可以覆蓋該設定，確保只有 `.grok/config.toml` 白名單允許的專案內改檔與內建唯讀工具能執行。
+- **為什麼修改模式預設帶 `--disallowed-tools run_terminal_cmd`（關閉 Shell 工具）**：`grok` 內建的唯讀 Shell 指令清單（`ls`、`cat`、`git status/diff/log`、`rg`、`grep` 等）**不包含 `find`**。實測若保留 Shell 工具，連單純找檔案讀檔，模型都很常先跑 `ls ...; find . -name ...`；在 `dontAsk` 下 `find` 會被拒絕（`stderr` 輸出 `permission required: Execute ... was not run`），並**直接中止整次無頭執行**（`"stopReason": "cancelled"`、exit code `0`）。關掉 `run_terminal_cmd` 能強制 `grok` 乖乖使用內建的 `read_file`、`list_dir`、`grep` 工具。
+- **如何放行 `grok` 執行測試或編譯指令（如 `pytest`、`cargo test`）**：在 `<專案>/.grok/config.toml` 的 `[permission]` `allow` 陣列加入精確的 `Bash(...)` glob 規則（例如 `"Bash(pytest *)"` 或 `"Bash(cargo test *)"`），並在呼叫 `grok-worker.py` 時加上 `--allow-shell`。注意 `grok` 的 `Bash(...)` 規則採 glob 比對（`*` 可匹配包含空白的任意字元，故寫 `Bash(git *)`），與 `agy` 不加 `*` 的前綴比對（`command(git status)`）不同。
+- **符號連結（Symlink）與實體路徑**：`grok` 在比對 `Write(...)` 與 `Edit(...)` 規則前會先解析 symlink（例如 macOS 的 `/tmp` 會變成 `/private/tmp`），用 symlink 路徑寫規則會被拒絕。`setup-grok.sh` 一律寫入 `pwd -P` 實體路徑。
+- **`--max-turns` 搭配 `--wall-timeout` 雙重逾時保護**：`grok` 沒有 `--print-timeout` 旗標，因此以 `--max-turns <N>`（依 Tier 1/2/3 分別為 30 / 60 / 100，上限 120）限制模型回合數（撞到上限時 exit code 為 `1`、`"stopReason": "max_turn_requests"`，可用 `--resume <sessionId>` 接續），再由 `grok-worker.py` 的 `--wall-timeout` 提供 process-group 等級的 Wall-clock Timeout（逾時回傳 exit code `124`）。
+
+---
 
 ## 額度與安全檢查清單
 
-- **額度計算**：Antigravity 依實際代理工作量與 Token 計費（每 5 小時刷新，另有每週上限）。每次無頭呼叫基礎上下文約耗費 6,000～10,000 `input_tokens`，建議將同類批次修改集中於單次呼叫或以 `--conversation` 接續。
-- **模型分池**：Gemini 與 Claude/GPT 模型分屬不同額度池，日常粗活建議用 Gemini Flash。
+- **額度計算**：Antigravity 依實際代理工作量與 Token 計費（每 5 小時刷新，另有每週上限）。每次無頭呼叫基礎上下文約耗費 6,000～10,000 `input_tokens`，建議將同類批次修改集中於單次呼叫或以 `--conversation`（`grok` 為 `--resume <sessionId>`）接續。
+- **模型分池**：`agy` 中 Gemini 與 Claude/GPT 模型分屬不同額度池；`grok` 則使用你的 xAI / SuperGrok 額度。日常粗活建議用預設輕量／Fast 模型。
 - **家庭共用**：家庭群組內 Antigravity 額度為全家共用。
-- **輸出視為不可信資料**：規則會要求 Claude 把 `agy` 的輸出（以及 `agy` 從專案中讀到的內容）當成資料而不是指令，因為專案裡的檔案可能被植入惡意文字。接受變更前仍請檢查 diff。
-- **安全底線**：建議使用 Git 版控（有 Git 時規則會用 `git status` / `git diff`，沒有時改用備份或檔案清單比對）、禁止使用 `--dangerously-skip-permissions`，且每次外包後務必檢查變更。
+- **輸出視為不可信資料**：規則會要求 Claude 把 `agy` 與 `grok` 的輸出（以及它們從專案中讀到的內容）當成資料而不是指令，因為專案裡的檔案可能被植入惡意文字。接受變更前仍請檢查 diff。
+- **安全底線**：建議使用 Git 版控（有 Git 時規則會用 `git status` / `git diff`，沒有時改用備份或檔案清單比對）、禁止使用 `--dangerously-skip-permissions` 或 `--always-approve` / `--yolo`，且每次外包後務必檢查變更。
+
