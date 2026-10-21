@@ -85,6 +85,17 @@ jobs:
           echo "--- second run must be idempotent"
           bash "$GITHUB_WORKSPACE/setup.sh"
           bash "$GITHUB_WORKSPACE/scripts/verify.sh"
+          echo "--- target-specific flags (--claude-only / --agents-only)"
+          rm -f CLAUDE.md AGENTS.md
+          bash "$GITHUB_WORKSPACE/setup.sh" --claude-only
+          [ -f CLAUDE.md ] && [ ! -f AGENTS.md ]
+          bash "$GITHUB_WORKSPACE/scripts/verify.sh" --claude-only
+          rm -f CLAUDE.md AGENTS.md
+          bash "$GITHUB_WORKSPACE/setup.sh" --agents-only
+          [ -f AGENTS.md ] && [ ! -f CLAUDE.md ]
+          bash "$GITHUB_WORKSPACE/scripts/verify.sh" --agents-only
+          bash "$GITHUB_WORKSPACE/setup.sh"
+          bash "$GITHUB_WORKSPACE/scripts/verify.sh"
 
           echo "--- malformed settings must abort, keep a .bak, and stay untouched"
           for bad in '{"permissions": null}' '{"permissions": {"allow": "command(ls)"}}' '{"trustedWorkspaces": "x"}' '{"permissions": []}' '{"permissions": '; do
@@ -118,18 +129,33 @@ jobs:
           Remove-Item $settings -Force -ErrorAction SilentlyContinue
           $utf8 = New-Object System.Text.UTF8Encoding($false)
 
-          function Run($file) {
-            & $ps -NoProfile -ExecutionPolicy Bypass -File $file
+          function Run($file, $arg = $null) {
+            if ($arg) {
+              & $ps -NoProfile -ExecutionPolicy Bypass -File $file $arg
+            } else {
+              & $ps -NoProfile -ExecutionPolicy Bypass -File $file
+            }
             return $LASTEXITCODE
           }
-          function Must-Pass($file) {
-            $code = Run $file
-            if ($code -ne 0) { throw "$file exited with $code" }
+          function Must-Pass($file, $arg = $null) {
+            $code = Run $file $arg
+            if ($code -ne 0) { throw "$file $arg exited with $code" }
           }
 
           Must-Pass $setup
           Must-Pass $verify
           "--- second run must be idempotent"
+          Must-Pass $setup
+          Must-Pass $verify
+          "--- target-specific flags (--claude-only / --agents-only)"
+          Remove-Item CLAUDE.md, AGENTS.md -Force -ErrorAction SilentlyContinue
+          Must-Pass $setup "--claude-only"
+          if (-not (Test-Path CLAUDE.md) -or (Test-Path AGENTS.md)) { throw "--claude-only did not produce only CLAUDE.md" }
+          Must-Pass $verify "--claude-only"
+          Remove-Item CLAUDE.md, AGENTS.md -Force -ErrorAction SilentlyContinue
+          Must-Pass $setup "--agents-only"
+          if (-not (Test-Path AGENTS.md) -or (Test-Path CLAUDE.md)) { throw "--agents-only did not produce only AGENTS.md" }
+          Must-Pass $verify "--agents-only"
           Must-Pass $setup
           Must-Pass $verify
 

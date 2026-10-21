@@ -35,5 +35,7 @@ expect 0 "| and && inside single quotes not split" "{\"tool_name\":\"Bash\",\"to
 expect 2 "real ; after quoted prompt still split" "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"agy -p \\\"x; y\\\" $JT; agy -p hi\",\"timeout\":600000}}"
 expect 0 "/usage query is exempt" '{"tool_name":"Bash","tool_input":{"command":"agy -p \"/usage\" --output-format json"}}'
 expect 2 "prompt merely mentioning /usage is not exempt" '{"tool_name":"Bash","tool_input":{"command":"agy -p \"explain /usage\" --output-format json"}}'
+expect 0 "codex/opencode shell + timeout_ms passes" "{\"tool_name\":\"shell\",\"tool_input\":{\"command\":\"agy -p \\\"hi\\\" $JT\",\"timeout_ms\":600000}}"
+expect 2 "codex/opencode shell missing json blocked" '{"tool_name":"shell","tool_input":{"command":"agy -p \"hi\" --print-timeout 540s","timeout_ms":600000}}'
 
 exit $fail

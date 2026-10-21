@@ -4,9 +4,10 @@
 # It never calls a model, so it costs no quota. Exit code = number of FAIL lines.
 set -uo pipefail
 
-EXPECTED_RULES="v4"
+EXPECTED_RULES="v5"
 PROJECT_DIR="$(pwd -P)"
 SETTINGS="$HOME/.gemini/antigravity-cli/settings.json"
+TARGET_SPEC="${1:-${AGY_BRIDGE_TARGETS:-all}}"
 fail=0
 
 pass() { echo "PASS  $1"; }
@@ -43,10 +44,16 @@ if ! command -v python3 > /dev/null 2>&1; then
     echo; echo "$fail failure(s)."; exit "$fail"
 fi
 
-out="$(python3 - "$SETTINGS" "$PROJECT_DIR" "$EXPECTED_RULES" << 'PY'
+out="$(python3 - "$SETTINGS" "$PROJECT_DIR" "$EXPECTED_RULES" "$TARGET_SPEC" << 'PY'
 import json, os, re, sys
 
-settings, project, expected = sys.argv[1:4]
+settings, project, expected, target_spec = sys.argv[1:5]
+if target_spec in ("--claude", "--claude-only", "claude", "CLAUDE.md"):
+    target_docs = ("CLAUDE.md",)
+elif target_spec in ("--agents", "--agents-only", "--codex", "agents", "codex", "AGENTS.md"):
+    target_docs = ("AGENTS.md",)
+else:
+    target_docs = ("CLAUDE.md", "AGENTS.md")
 fails = 0
 
 def ok(m): print("PASS  " + m)
@@ -88,21 +95,25 @@ if data is not None:
             for r in ("write_file(.git/)", "read_file(.env)"):
                 (ok if r in deny else bad)("deny rule present: " + r)
 
-# --- CLAUDE.md
-md_path = os.path.join(project, "CLAUDE.md")
-if not os.path.exists(md_path):
-    bad("CLAUDE.md not found in the project root (run setup.sh here)")
-else:
-    md = open(md_path, encoding="utf-8").read()
-    starts = re.findall(r"^<!-- agy-bridge:start (v\d+) -->$", md, re.M)
-    ends = re.findall(r"^<!-- agy-bridge:end -->$", md, re.M)
-    if len(starts) != 1 or len(ends) != 1:
-        bad("CLAUDE.md must contain exactly one agy-bridge block (found %d start, %d end)" % (len(starts), len(ends)))
+# --- CLAUDE.md / AGENTS.md
+for doc_name in target_docs:
+    md_path = os.path.join(project, doc_name)
+    if not os.path.exists(md_path):
+        bad(doc_name + " not found in the project root (run setup.sh here)")
     else:
-        (ok if starts[0] == expected else bad)("CLAUDE.md rules version is %s (expected %s)" % (starts[0], expected))
-        block = md[md.index("<!-- agy-bridge:start"):]
-        (bad if "``" in block else ok)("rules block has no doubled backticks")
-        (ok if '`agy -p "/usage"' in block else bad)("rules block mentions the /usage quota check")
+        raw_md = open(md_path, "rb").read()
+        if raw_md.startswith(b"\xef\xbb\xbf"):
+            bad(doc_name + " starts with a UTF-8 BOM")
+        md = raw_md.decode("utf-8-sig")
+        starts = re.findall(r"^<!-- agy-bridge:start (v\d+) -->$", md, re.M)
+        ends = re.findall(r"^<!-- agy-bridge:end -->$", md, re.M)
+        if len(starts) != 1 or len(ends) != 1:
+            bad("%s must contain exactly one agy-bridge block (found %d start, %d end)" % (doc_name, len(starts), len(ends)))
+        else:
+            (ok if starts[0] == expected else bad)("%s rules version is %s (expected %s)" % (doc_name, starts[0], expected))
+            block = md[md.index("<!-- agy-bridge:start"):]
+            (bad if "``" in block else ok)(doc_name + " rules block has no doubled backticks")
+            (ok if '`agy -p "/usage"' in block else bad)(doc_name + " rules block mentions the /usage quota check")
 
 sys.exit(fails)
 PY

@@ -1,6 +1,14 @@
 $ErrorActionPreference = "Stop"
 try {
-Write-Host "[INFO] Initializing Claude Code x Antigravity (agy) integration (Windows)..."
+Write-Host "[INFO] Initializing AI Agent x Antigravity (agy) integration (Windows, CLAUDE.md / AGENTS.md)..."
+
+$TargetArg = if ($args.Count -gt 0 -and $args[0]) { [string]$args[0] } elseif ($env:AGY_BRIDGE_TARGETS) { $env:AGY_BRIDGE_TARGETS } else { "all" }
+switch -Regex ($TargetArg) {
+    '^(--claude|--claude-only|claude|CLAUDE\.md)$' { $TargetDocs = @("CLAUDE.md") }
+    '^(--agents|--agents-only|--codex|agents|codex|AGENTS\.md)$' { $TargetDocs = @("AGENTS.md") }
+    '^(--all|all|CLAUDE\.md,AGENTS\.md|)$' { $TargetDocs = @("CLAUDE.md", "AGENTS.md") }
+    default { throw "[ERROR] Unknown target option: '$TargetArg' (use --all, --claude-only, or --agents-only)." }
+}
 
 # 0. Make sure we're in a project directory. This directory becomes a trusted,
 #    writable workspace for agy, so refuse $HOME or a drive root and confirm non-git folders.
@@ -182,12 +190,13 @@ $TmpFile = "$SettingsFile.tmp"
 Move-Item -LiteralPath $TmpFile -Destination $SettingsFile -Force
 Write-Host "[OK] settings.json updated successfully (UTF-8 no BOM)."
 
-# 3. Create, update or append the CLAUDE.md rules block (non-destructive).
+# 3. Create, update or append the CLAUDE.md / AGENTS.md rules block (non-destructive).
 #    The block is wrapped in agy-bridge markers so re-running upgrades it in place.
-$ClaudeMd = Join-Path $CurrentDir "CLAUDE.md"
 $RuleContent = @"
-<!-- agy-bridge:start v4 -->
+<!-- agy-bridge:start v5 -->
 ## Delegating Tasks to Antigravity (agy)
+
+> **Orchestrator-only rule (never recurse):** These instructions are for the outer coding agent (Claude Code, Codex CLI, OpenCode, Grok, Cursor, Windsurf, etc.). If you ARE Antigravity (``agy``) executing a task, ignore this section completely and never invoke ``agy``.
 
 Suitable for delegation: batch multi-file edits, writing unit tests, repo-wide searches, code reviews.
 Not suitable: architectural decisions, debugging with an unknown root cause, small single-file edits.
@@ -220,20 +229,21 @@ Quota groups can change, so never hardcode which models share a quota. Read it f
    - **Read-only task** (listing, searching, summarizing): never block on repo state. Forbid writes in the prompt, and afterwards confirm nothing changed (``git status`` if the project uses git, otherwise compare the file list).
    - **Task may write files, project uses git:** verify ``git status`` is clean. If it is not, ask the user; never commit or stash on their behalf.
    - **Task may write files, no git:** tell the user once that changes cannot be diffed, and get their confirmation (or a backup) before calling ``agy``.
-2. For long or complex instructions, write the spec to ``TASK.md`` first, then run:
+2. For long, multi-line, or complex instructions (or prompts with quotes or special characters), write the spec to ``TASK.md`` first to avoid shell quoting issues across Bash and PowerShell, then run:
    ``agy -p "Execute the instructions in TASK.md" --output-format json --print-timeout 540s [--model <MODEL_ID>]``
    - Run the rule 1 check **before** creating ``TASK.md``; ``TASK.md`` is the only file allowed to be uncommitted when you call ``agy``.
    - Never commit ``TASK.md``. Delete it as soon as ``agy`` returns (success or failure) so the next run starts from a clean tree.
-3. **Timeouts:** ``agy -p`` prints nothing until it finishes, and Claude Code does **not** kill it when the Bash tool times out: it keeps running and editing files.
-   - Foreground calls: always pass ``--print-timeout 540s`` and set the Bash tool ``timeout`` to ``600000``, so ``agy`` stops itself before the tool gives up.
-   - For Tier 3 or anything that may take longer, start it with ``run_in_background: true`` (with a ``--print-timeout`` that fits the task) and poll its output instead of blocking.
+3. **Timeouts & Agent Sandboxes:** ``agy -p`` prints nothing until it finishes, and your shell tool does **not** kill it when the tool times out: it keeps running and editing files.
+   - Foreground calls: always pass ``--print-timeout 540s`` and set your shell tool timeout (``timeout`` in Claude Code / OpenCode, ``timeout_ms`` in Codex CLI) to ``600000``, so ``agy`` stops itself before the tool gives up.
+   - For Tier 3 or anything that may take longer, start it in the background (``run_in_background: true`` in Claude Code, or background exec/terminal mode in Codex / other agents) with a ``--print-timeout`` that fits the task, and poll its output instead of blocking.
+   - **Sandboxed agents (e.g. OpenAI Codex CLI):** ``agy`` requires network access and writes session/auth state to ``~/.gemini/antigravity-cli``. A ``workspace-write`` or offline sandbox will block ``agy``. Always request escalated/unsandboxed execution (e.g. ``sandbox_permissions: "require_escalated"`` in Codex) for every ``agy`` command.
    - ``[agy] print timeout after ...; returning partial output`` in ``stderr`` means the run was cut off. ``status`` is still ``SUCCESS`` and the exit code is 0, but treat it as a failure: review ``git diff`` for half-applied edits and ask the user how to continue (e.g. resume with ``--conversation <conversation_id>``).
-   - If a Bash call times out anyway, check for a live ``agy`` process and review ``git status`` before doing anything else. Never start a second ``agy`` run on the same tree while one is running.
+   - If a shell call times out anyway, check for a live ``agy`` process and review ``git status`` before doing anything else. Never start a second ``agy`` run on the same tree while one is running.
 4. **Error & Quota Fallback (CRITICAL):**
    - Only adopt ``response`` when JSON ``status`` is ``SUCCESS`` **and** ``response`` is non-empty. An empty ``response``, a non-empty ``denied_actions``, or a ``no output produced — a tool required the "..." permission`` message in ``stderr`` means the task was soft-denied: treat it as a failure, do not adopt it, and tell the user which rule (e.g. ``command(...)`` or ``write_file(...)``) needs to be added to ``permissions.allow``.
    - **Quota exhaustion** is a "Quota Exceeded", "429", "RESOURCE_EXHAUSTED", "quota reached", "usage limit" or "rate limit" message in ``stderr``, ``response`` or ``error`` (JSON ``status`` ``ERROR``), or a group with ``remaining_fraction`` 0 in ``/usage`` (section 1b). Run ``/usage`` to see which group is exhausted; do not guess from the error text.
-   - **Switching models is allowed** because it only uses ``agy`` quota, not Claude's. If the failed run left the tree unchanged (compare ``git status --short`` or the file list with how it looked just before the call; files that already existed then, such as ``TASK.md`` or an untracked ``CLAUDE.md``, do not count), retry the same task **once** with a same-tier model from a group that is not exhausted, and tell the user which model was used instead and why. If the failed run changed files, stop and ask the user instead of retrying. Do not send more work to an exhausted group for the rest of the session.
-   - If **every group** is exhausted, or the retry fails: stop immediately and report, for each group, its name, which limit it hit (5-hour or weekly), ``remaining_fraction`` and ``reset_time`` (convert to the user's local time). **DO NOT** automatically fall back to executing the large batch task yourself; ask for the user's explicit decision (wait for the quota to refresh, or proceed using Claude's own quota).
+   - **Switching models is allowed** because it only uses ``agy`` quota, not your own. If the failed run left the tree unchanged (compare ``git status --short`` or the file list with how it looked just before the call; files that already existed then, such as ``TASK.md`` or an untracked ``CLAUDE.md`` or ``AGENTS.md``, do not count), retry the same task **once** with a same-tier model from a group that is not exhausted, and tell the user which model was used instead and why. If the failed run changed files, stop and ask the user instead of retrying. Do not send more work to an exhausted group for the rest of the session.
+   - If **every group** is exhausted, or the retry fails: stop immediately and report, for each group, its name, which limit it hit (5-hour or weekly), ``remaining_fraction`` and ``reset_time`` (convert to the user's local time). **DO NOT** automatically fall back to executing the large batch task yourself; ask for the user's explicit decision (wait for the quota to refresh, or proceed using your own quota).
    - Timeouts and soft-denials are not quota errors: never switch models for them.
 5. To continue an existing session, pass ``--conversation <conversation_id>``.
 6. After completion, review the changes (``git diff`` if the project uses git, otherwise compare against the backup or file list) and execute tests.
@@ -243,31 +253,34 @@ Quota groups can change, so never hardcode which models share a quota. Read it f
 "@
 $RuleContent = $RuleContent.Trim()
 
-$Existing = ""
-if (Test-Path $ClaudeMd) { $Existing = [System.IO.File]::ReadAllText($ClaudeMd) }
+foreach ($DocName in $TargetDocs) {
+    $DocPath = Join-Path $CurrentDir $DocName
+    $Existing = ""
+    if (Test-Path $DocPath) { $Existing = [System.IO.File]::ReadAllText($DocPath) }
 
-# Markers are matched at line start so this script's own source never matches.
-$Match = [regex]::Match($Existing, '(?ms)^<!-- agy-bridge:start[^\r\n]*-->\r?\n.*?^<!-- agy-bridge:end -->')
-if ($Match.Success) {
-    $New = $Existing.Substring(0, $Match.Index) + $RuleContent + $Existing.Substring($Match.Index + $Match.Length)
-    if ($New -ceq $Existing) {
-        Write-Host "[OK] CLAUDE.md already has the latest Antigravity rules."
+    # Markers are matched at line start so this script's own source never matches.
+    $Match = [regex]::Match($Existing, '(?ms)^<!-- agy-bridge:start[^\r\n]*-->\r?\n.*?^<!-- agy-bridge:end -->')
+    if ($Match.Success) {
+        $New = $Existing.Substring(0, $Match.Index) + $RuleContent + $Existing.Substring($Match.Index + $Match.Length)
+        if ($New -ceq $Existing) {
+            Write-Host "[OK] $DocName already has the latest Antigravity rules."
+        } else {
+            [System.IO.File]::WriteAllText($DocPath, $New, $Utf8NoBom)
+            Write-Host "[OK] $DocName Antigravity rules updated to the latest version."
+        }
+    } elseif ($Existing -match [regex]::Escape("Antigravity (agy)")) {
+        Write-Host "[WARN] $DocName has an older, unmarked Antigravity section. It was left untouched."
+        Write-Host "       Delete the '## Delegating Tasks to Antigravity (agy)' section once, then re-run this script."
+        Write-Host "       Future upgrades will then be automatic (see README Q5)."
     } else {
-        [System.IO.File]::WriteAllText($ClaudeMd, $New, $Utf8NoBom)
-        Write-Host "[OK] CLAUDE.md Antigravity rules updated to the latest version."
+        $Prefix = ""
+        if ($Existing.Length -gt 0) {
+            $Prefix = "`n"
+            if (-not $Existing.EndsWith("`n")) { $Prefix = "`n`n" }
+        }
+        [System.IO.File]::AppendAllText($DocPath, $Prefix + $RuleContent + "`n", $Utf8NoBom)
+        Write-Host "[OK] $DocName updated with dynamic model tiering rules."
     }
-} elseif ($Existing -match [regex]::Escape("Antigravity (agy)")) {
-    Write-Host "[WARN] CLAUDE.md has an older, unmarked Antigravity section. It was left untouched."
-    Write-Host "       Delete the '## Delegating Tasks to Antigravity (agy)' section once, then re-run this script."
-    Write-Host "       Future upgrades will then be automatic (see README Q5)."
-} else {
-    $Prefix = ""
-    if ($Existing.Length -gt 0) {
-        $Prefix = "`n"
-        if (-not $Existing.EndsWith("`n")) { $Prefix = "`n`n" }
-    }
-    [System.IO.File]::AppendAllText($ClaudeMd, $Prefix + $RuleContent + "`n", $Utf8NoBom)
-    Write-Host "[OK] CLAUDE.md updated with dynamic model tiering rules."
 }
 
 Write-Host "------------------------------------------------------------------------"

@@ -4,9 +4,17 @@
 # It never calls a model, so it costs no quota. The exit code is the number of FAIL lines.
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI.
 $ErrorActionPreference = "Continue"
-$ExpectedRules = "v4"
+$ExpectedRules = "v5"
 $ProjectDir = (Get-Location).ProviderPath.TrimEnd('\')
 $Settings = Join-Path $HOME ".gemini\antigravity-cli\settings.json"
+$TargetArg = if ($args.Count -gt 0 -and $args[0]) { [string]$args[0] } elseif ($env:AGY_BRIDGE_TARGETS) { $env:AGY_BRIDGE_TARGETS } else { "all" }
+if ($TargetArg -match '^(--claude|--claude-only|claude|CLAUDE\.md)$') {
+    $TargetDocs = @("CLAUDE.md")
+} elseif ($TargetArg -match '^(--agents|--agents-only|--codex|agents|codex|AGENTS\.md)$') {
+    $TargetDocs = @("AGENTS.md")
+} else {
+    $TargetDocs = @("CLAUDE.md", "AGENTS.md")
+}
 $script:Fail = 0
 
 function Pass($Msg) { "PASS  $Msg" }
@@ -73,22 +81,27 @@ if ($Data) {
     }
 }
 
-# 3. CLAUDE.md
-$MdPath = Join-Path $ProjectDir "CLAUDE.md"
-if (-not (Test-Path -LiteralPath $MdPath)) {
-    Bad "CLAUDE.md not found in the project root (run setup.ps1 here)"
-} else {
-    $Md = [System.IO.File]::ReadAllText($MdPath)
-    $Starts = [regex]::Matches($Md, '(?m)^<!-- agy-bridge:start (v\d+) -->\r?$')
-    $Ends = [regex]::Matches($Md, '(?m)^<!-- agy-bridge:end -->\r?$')
-    if (($Starts.Count -ne 1) -or ($Ends.Count -ne 1)) {
-        Bad "CLAUDE.md must contain exactly one agy-bridge block (found $($Starts.Count) start, $($Ends.Count) end)"
+# 3. CLAUDE.md / AGENTS.md
+foreach ($DocName in $TargetDocs) {
+    $MdPath = Join-Path $ProjectDir $DocName
+    if (-not (Test-Path -LiteralPath $MdPath)) {
+        Bad "$DocName not found in the project root (run setup.ps1 here)"
     } else {
-        $Version = $Starts[0].Groups[1].Value
-        Check ($Version -eq $ExpectedRules) "CLAUDE.md rules version is $Version (expected $ExpectedRules)"
-        $Block = $Md.Substring($Starts[0].Index)
-        Check (-not $Block.Contains('``')) "rules block has no doubled backticks"
-        Check ($Block.Contains('`agy -p "/usage"')) "rules block mentions the /usage quota check"
+        $MdBytes = [System.IO.File]::ReadAllBytes($MdPath)
+        $MdHasBom = ($MdBytes.Length -ge 3) -and ($MdBytes[0] -eq 0xEF) -and ($MdBytes[1] -eq 0xBB) -and ($MdBytes[2] -eq 0xBF)
+        Check (-not $MdHasBom) "$DocName has no UTF-8 BOM"
+        $Md = [System.IO.File]::ReadAllText($MdPath)
+        $Starts = [regex]::Matches($Md, '(?m)^<!-- agy-bridge:start (v\d+) -->\r?$')
+        $Ends = [regex]::Matches($Md, '(?m)^<!-- agy-bridge:end -->\r?$')
+        if (($Starts.Count -ne 1) -or ($Ends.Count -ne 1)) {
+            Bad "$DocName must contain exactly one agy-bridge block (found $($Starts.Count) start, $($Ends.Count) end)"
+        } else {
+            $Version = $Starts[0].Groups[1].Value
+            Check ($Version -eq $ExpectedRules) "$DocName rules version is $Version (expected $ExpectedRules)"
+            $Block = $Md.Substring($Starts[0].Index)
+            Check (-not $Block.Contains('``')) "$DocName rules block has no doubled backticks"
+            Check ($Block.Contains('`agy -p "/usage"')) "$DocName rules block mentions the /usage quota check"
+        }
     }
 }
 

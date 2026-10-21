@@ -26,7 +26,7 @@ Google 官方 CLI 本身就支援無頭模式，Claude Code 可以直接用 Bash
 
 ## 快速開始（一鍵自動設定）
 
-在你的**專案根目錄**執行設定腳本，即可自動完成：**檢查並安裝 `agy`、以無 BOM 的 UTF-8 格式安全合併 `settings.json` 權限白名單、將當前目錄加入信任區、以及無損附加 `CLAUDE.md` 動態外包規則**。
+在你的**專案根目錄**執行設定腳本，即可自動完成：**檢查並安裝 `agy`、以無 BOM 的 UTF-8 格式安全合併 `settings.json` 權限白名單、將當前目錄加入信任區、以及無損附加 `CLAUDE.md`（給 Claude Code）與 `AGENTS.md`（給 OpenAI Codex CLI、OpenCode、Grok、Cursor、Windsurf、Cline、GitHub Copilot）動態外包規則**。若只想產生單一檔案，可加上 `--claude-only` 或 `--agents-only` 參數（或設定環境變數 `AGY_BRIDGE_TARGETS=CLAUDE.md` / `AGENTS.md`）。
 
 ### 一分鐘看懂：哪些是全域、哪些跟專案走？
 
@@ -34,7 +34,7 @@ Google 官方 CLI 本身就支援無頭模式，Claude Code 可以直接用 Bash
 | --- | --- | --- |
 | 登入 `agy`（步驟 2） | 你的電腦（快取的登入憑證） | **只需一次** |
 | 允許／禁止規則與信任資料夾 | 全域一份：`~/.gemini/antigravity-cli/settings.json`（Windows：`C:\Users\<你>\.gemini\antigravity-cli\settings.json`）。每個你設定過的專案會把自己的資料夾加進去，原有的項目會保留。 | 每個專案 |
-| 給 Claude 的委派規則 | **該專案根目錄**的 `CLAUDE.md`。Claude Code 只會讀它所在專案的那一份。 | 每個專案 |
+| 給上層 AI 的委派規則 | **該專案根目錄**的 `CLAUDE.md`（Claude Code 專用）與 `AGENTS.md`（Codex CLI、OpenCode/Grok、Cursor、Windsurf、Cline、Copilot 等通用標準）。 | 每個專案 |
 
 所以每個新專案：`cd` 到專案根目錄，執行一次 setup 腳本（步驟 1）即可。步驟 2、3 只要做一次。沒跑過 setup 的專案沒有委派規則，`agy` 也不被允許在那裡寫檔。
 
@@ -134,7 +134,7 @@ agy -p "用一句話解釋 git status" --output-format json
 
 ### 步驟 4（選用）：檢查安裝結果
 
-在專案根目錄執行自我檢查。它不會呼叫任何模型，所以不耗額度。會確認 `agy` 已在 PATH、`settings.json` 格式正確且包含這個專案的規則、`CLAUDE.md` 是最新的規則區塊，並列出你的額度分組：
+在專案根目錄執行自我檢查。它不會呼叫任何模型，所以不耗額度。會確認 `agy` 已在 PATH、`settings.json` 格式正確且包含這個專案的規則、`CLAUDE.md` 與 `AGENTS.md` 皆為最新的規則區塊，並列出你的額度分組：
 
 ```bash
 # macOS / Linux / WSL（repo 內的 scripts/ 資料夾；或從與 setup.sh 同一個 tag 下載 verify.sh）
@@ -148,11 +148,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 
 每一行是 `PASS`、`WARN` 或 `FAIL`；結束代碼等於 `FAIL` 的行數。若有異常，回報問題時請附上輸出。同一支腳本每次 push 後也會在 CI 的 Ubuntu、macOS 與 Windows（PowerShell 5.1 與 7）上執行。
 
-### 怎麼用、怎麼移除
+### 跨平台／跨 Agent 怎麼用（Claude Code、Codex CLI、OpenCode/Grok、Cursor）、怎麼移除
 
-在跑過 setup 的專案裡啟動 `claude`。Claude Code 會讀 `CLAUDE.md` 的規則，自行判斷何時委派。批次工作（改很多檔、補單元測試、全專案搜尋、code review）很適合；架構決策與小改動則由 Claude 自己處理。這是引導而不是保證：想確保的話，直接說，例如「這個請依據 CLAUDE.md 外包給 agy」。預設 `agy` 只能執行 `ls`、`git status` 這類唯讀指令，要放行更多請看下方「如何新增 CLI 技能」教學。
+在跑過 setup 的專案裡啟動 `claude`、`codex`、`opencode` 或其他支援 `AGENTS.md` 的 AI 工具。Claude Code 會讀 `CLAUDE.md`；而 OpenAI Codex CLI、OpenCode（常接 Grok / DeepSeek 等）、Cursor、Windsurf、Cline、Copilot 則會自動讀 `AGENTS.md`。批次工作（改很多檔、補單元測試、全專案搜尋、code review）很適合外包；架構決策與小改動則留給上層 AI 自己處理。這是引導而不是保證：想確保的話，直接說「這個請依據 CLAUDE.md / AGENTS.md 外包給 agy」。預設 `agy` 只能執行 `ls`、`git status` 這類唯讀指令，要放行更多請看下方「如何新增 CLI 技能」教學。
 
-要從某個專案移除：刪掉該專案 `CLAUDE.md` 裡 `<!-- agy-bridge:start ... -->` 到 `<!-- agy-bridge:end -->` 之間的區塊，再從全域 `settings.json` 的 `permissions.allow`（那條 `write_file(...)`）與 `trustedWorkspaces` 刪掉該專案資料夾。目前沒有自動解除安裝。
+> [!IMPORTANT]
+> **跨 AI 平台（Codex / Grok / OpenCode / Windows）細微差異與避坑重點（已內建於 `v5` 規則）：**
+> 1. **OpenAI Codex CLI 的預設沙盒攔截（Seatbelt / Landlock）**：Codex CLI 預設在 `workspace-write` 沙盒中執行指令，**預設斷網且禁止寫入 `$HOME/.gemini/antigravity-cli`**，會導致 `agy` 無法連線或寫入 session/token。`v5` 規則已明確指示 Codex 在呼叫 `agy` 時必須請求跳出沙盒（`sandbox_permissions: "require_escalated"`）；當 Codex 跳出權限詢問時請點選允許。
+> 2. **防止 `agy` 讀到 `AGENTS.md` 自我遞迴（Self-Recursion）**：因為 `agy` 也是在同一個專案目錄下執行，若它自己讀到 `AGENTS.md` / `CLAUDE.md` 可能會誤以為自己也要去呼叫 `agy`。本專案透過雙重防護避免遞迴：`settings.json` 白名單不放行 `command(agy)`，且 `v5` 規則開頭明定若執行者本身就是 `agy` 則忽略該區塊。
+> 3. **Windows PowerShell vs Bash 引號與跳脫字元差異**：在 Windows 上，Codex CLI 與 Cursor 預設常呼叫 PowerShell，而 Claude Code 預設呼叫 Git Bash。`v5` 規則第 2 點強制要求多行或含引號／特殊字元的複雜指令一律先寫入 `TASK.md` 再交由 `agy` 讀取，徹底避開跨 Shell 的引號跳脫問題。
+
+要從某個專案移除：刪掉該專案 `CLAUDE.md` 與 `AGENTS.md` 裡 `<!-- agy-bridge:start ... -->` 到 `<!-- agy-bridge:end -->` 之間的區塊，再從全域 `settings.json` 的 `permissions.allow`（那條 `write_file(...)`）與 `trustedWorkspaces` 刪掉該專案資料夾。目前沒有自動解除安裝。
 
 若 `scripts/verify.*` 或 setup 腳本警告 `CLAUDE.md` 有舊版、沒有標記的區塊，請看 [Q5](#q5-我之前跑過舊版設定腳本要怎麼更新到新版規則)：把舊區塊手動刪掉一次，再重新執行 setup。
 

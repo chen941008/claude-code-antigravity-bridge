@@ -26,7 +26,7 @@ User ──> Claude Code ──(Bash)──> agy -p "task" --output-format json 
 
 ## Quick Start (Automated Setup)
 
-Run the setup script inside your **project root directory** to automatically install `agy`, merge safe allow/deny rules into `settings.json` (strictly formatted as UTF-8 without BOM), trust the current workspace, and append dynamic delegation rules to `CLAUDE.md`.
+Run the setup script inside your **project root directory** to automatically install `agy`, merge safe allow/deny rules into `settings.json` (strictly formatted as UTF-8 without BOM), trust the current workspace, and append dynamic delegation rules to both `CLAUDE.md` (for **Claude Code**) and `AGENTS.md` (for **OpenAI Codex CLI, OpenCode, Grok, Cursor, Windsurf, Cline, GitHub Copilot**). To generate only one file, pass `--claude-only` or `--agents-only` (or set `AGY_BRIDGE_TARGETS=CLAUDE.md` / `AGENTS.md`).
 
 ### At a Glance: What Is Global, What Is Per Project?
 
@@ -34,7 +34,7 @@ Run the setup script inside your **project root directory** to automatically ins
 | --- | --- | --- |
 | Sign in to `agy` (Step 2) | Your computer (cached credentials) | **Once** |
 | Allow/deny rules and trusted folders | One global file: `~/.gemini/antigravity-cli/settings.json` (Windows: `C:\Users\<you>\.gemini\antigravity-cli\settings.json`). Each project you set up adds its own folder to it; existing entries are kept. | Each project |
-| Delegation rules for Claude | `CLAUDE.md` in **that project's root**. Claude Code only reads the one in the project it runs in. | Each project |
+| Delegation rules for your AI Agent | `CLAUDE.md` (Claude Code) and `AGENTS.md` (Codex CLI, OpenCode/Grok, Cursor, Windsurf, Cline, Copilot) in **that project's root**. | Each project |
 
 So for every new project: `cd` into its root and run the setup script once (Step 1). Skip Steps 2 and 3, they are one-time. A project you never ran setup in has no delegation rules, and `agy` is not allowed to write there.
 
@@ -134,7 +134,7 @@ Once you see `"status": "SUCCESS"`, launch `claude` and start delegating tasks:
 
 ### Step 4 (Optional): Check the Installation
 
-From your project root, run the self-check. It never calls a model, so it costs no quota. It confirms that `agy` is on PATH, that `settings.json` is valid and has the rules for this project, that `CLAUDE.md` has the current rules block, and prints your quota groups:
+From your project root, run the self-check. It never calls a model, so it costs no quota. It confirms that `agy` is on PATH, that `settings.json` is valid and has the rules for this project, that `CLAUDE.md` and `AGENTS.md` have the current rules block, and prints your quota groups:
 
 ```bash
 # macOS / Linux / WSL (the repo's scripts/ folder; or download verify.sh from the same tag as setup.sh)
@@ -148,11 +148,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 
 Every line is `PASS`, `WARN` or `FAIL`; the exit code is the number of `FAIL` lines. Paste the output into a bug report if something is off. The same script runs in CI on Ubuntu, macOS and Windows (PowerShell 5.1 and 7) after every push.
 
-### Using It, and Removing It
+### Using It Across Agents (Claude Code, Codex CLI, OpenCode/Grok, Cursor), and Removing It
 
-Start `claude` inside a project you ran setup in. Claude Code reads the rules in `CLAUDE.md` and decides when to delegate. Bulk work (many-file edits, unit tests, repo-wide searches, code reviews) is a good fit; architecture decisions and small edits stay with Claude. It is guidance, not a guarantee: to be sure, say so explicitly, e.g. "Delegate this to agy according to CLAUDE.md". By default `agy` may only run read-only commands such as `ls` and `git status`; see the "How to Add CLI Skills" tutorial below to allow more.
+Start `claude`, `codex`, `opencode`, or your `AGENTS.md`-compatible IDE agent inside a project you ran setup in. Claude Code reads `CLAUDE.md`, while Codex CLI, OpenCode (Grok / DeepSeek / etc.), Cursor, Windsurf, Cline, and Copilot read `AGENTS.md`. Bulk work (many-file edits, unit tests, repo-wide searches, code reviews) is a good fit; architecture decisions and small edits stay with your outer agent. It is guidance, not a guarantee: to be sure, say so explicitly, e.g. "Delegate this to agy according to CLAUDE.md / AGENTS.md". By default `agy` may only run read-only commands such as `ls` and `git status`; see the "How to Add CLI Skills" tutorial below to allow more.
 
-To remove it from a project: delete the block between `<!-- agy-bridge:start ... -->` and `<!-- agy-bridge:end -->` in that project's `CLAUDE.md`, then delete the project's folder from `permissions.allow` (the `write_file(...)` entry) and from `trustedWorkspaces` in the global `settings.json`. There is no automatic uninstall.
+> [!IMPORTANT]
+> **Cross-Agent Pitfalls Already Handled in `v5` Rules (and What to Watch For):**
+> 1. **OpenAI Codex CLI Sandbox (`workspace-write`):** Codex runs shell commands in an offline Seatbelt/Landlock sandbox by default, which blocks `agy` from reaching Google's API and writing session/auth state to `~/.gemini/antigravity-cli`. The `v5` rules instruct Codex to request escalated permissions (`sandbox_permissions: "require_escalated"`) for `agy` calls; approve the prompt when Codex asks, or run Codex with network/home access enabled for `agy`.
+> 2. **Self-Recursion Prevention:** Because `agy` runs in the same project root, it could read `AGENTS.md` / `CLAUDE.md` itself. Both `permissions.allow` (which omits `command(agy)`) and an explicit orchestrator-only header in `v5` prevent `agy` from recursively calling itself.
+> 3. **Shell Quoting on Windows PowerShell vs Bash:** Agents on Windows (Codex, Cursor) often invoke PowerShell instead of Bash. Rule 2 instructs agents to write multi-line or quote-heavy specs to `TASK.md` first rather than escaping inline strings.
+
+To remove it from a project: delete the block between `<!-- agy-bridge:start ... -->` and `<!-- agy-bridge:end -->` in that project's `CLAUDE.md` and `AGENTS.md`, then delete the project's folder from `permissions.allow` (the `write_file(...)` entry) and from `trustedWorkspaces` in the global `settings.json`. There is no automatic uninstall.
 
 If `scripts/verify.*` or the setup script warns about an older, unmarked section in `CLAUDE.md`, see [Q5](#q5-i-ran-an-older-version-of-the-setup-script-how-do-i-get-the-updated-rules): delete that old section once and re-run setup.
 

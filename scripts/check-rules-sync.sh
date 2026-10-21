@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Fails if the CLAUDE.md rules block embedded in setup.sh and setup.ps1 differ.
+# Fails if the CLAUDE.md / AGENTS.md rules block in setup.sh, setup.ps1, and AGENTS.md differ.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 python3 - <<'PY'
-import re, sys
+import difflib, os, re, sys
 
 def block(path, unescape):
     text = open(path, encoding="utf-8").read().replace("\r\n", "\n")
@@ -18,14 +18,19 @@ def block(path, unescape):
 sh = block("setup.sh", False)
 ps = block("setup.ps1", True)
 if sh != ps:
-    import difflib
     sys.stderr.write("".join(difflib.unified_diff(
         sh.splitlines(True), ps.splitlines(True), "setup.sh", "setup.ps1")))
     sys.exit("Rules blocks in setup.sh and setup.ps1 are out of sync.")
+if os.path.exists("AGENTS.md"):
+    ag = block("AGENTS.md", False)
+    if sh != ag:
+        sys.stderr.write("".join(difflib.unified_diff(
+            sh.splitlines(True), ag.splitlines(True), "setup.sh", "AGENTS.md")))
+        sys.exit("Rules block in AGENTS.md is out of sync with setup.sh.")
 marker = re.match(r"<!-- agy-bridge:start (v\d+) -->", sh).group(1)
 for path, pat in (("scripts/verify.sh", r'EXPECTED_RULES="(v\d+)"'), ("scripts/verify.ps1", r'\$ExpectedRules = "(v\d+)"')):
     found = re.search(pat, open(path, encoding="utf-8").read())
     if not found or found.group(1) != marker:
         sys.exit(f"{path} expects rules {found and found.group(1)} but setup.sh ships {marker}")
-print("OK: rules blocks in setup.sh and setup.ps1 are identical, verify scripts expect " + marker + ".")
+print("OK: rules blocks in setup.sh, setup.ps1, and AGENTS.md are identical, verify scripts expect " + marker + ".")
 PY

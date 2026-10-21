@@ -88,10 +88,10 @@ def main():
         event = json.load(sys.stdin)
     except Exception:
         return 0
-    if event.get("tool_name") != "Bash":
+    if event.get("tool_name") not in ("Bash", "bash", "shell", "exec_command"):
         return 0
     tool_input = event.get("tool_input") or {}
-    segments = headless_agy_segments(tool_input.get("command") or "")
+    segments = headless_agy_segments(tool_input.get("command") or tool_input.get("cmd") or "")
     if not segments:
         return 0
 
@@ -100,7 +100,7 @@ def main():
         problems.append("add `--output-format json` so status, response and denied_actions can be checked")
     background = tool_input.get("run_in_background") is True
     try:
-        timeout = int(tool_input.get("timeout") or 0)
+        timeout = int(tool_input.get("timeout") or tool_input.get("timeout_ms") or 0)
     except (TypeError, ValueError):
         timeout = 0
     if not background and timeout < MIN_TIMEOUT_MS:
