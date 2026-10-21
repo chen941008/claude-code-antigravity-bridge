@@ -148,10 +148,7 @@ $DefaultAllow = @(
     "command(ls)",
     "command(dir)",
     "command(Get-ChildItem)",
-    "command(git status)",
-    "command(git diff)",
-    "command(git log)",
-    "command(git ls-files)"
+    "command(git)"
 )
 $DefaultDeny = @(
     "command(rm -rf)",
@@ -199,7 +196,7 @@ $RuleContent = @"
 
 > **Role & Self-Recursion Guard:**
 > - **If you ARE the outer coding agent** (Claude Code, Codex CLI, OpenCode, Grok, Cursor, Windsurf, etc.): **Delegate by default** whenever a task reads, summarizes, searches, reviews, tests, or edits **3 or more files** (or the whole repository), even if the user did not explicitly mention ``agy``. Keep only architectural decisions, unknown-cause debugging, and 1–2 file quick edits for yourself.
-> - **If you ARE Antigravity (``agy``) executing a task:** Never invoke ``agy``. Use your built-in ``read_file``, ``edit_file``, and ``write_file`` tools for all file operations. When calling ``run_command``, **NEVER use pipes (``|``), chains (``&&``, ``;``), redirection (``>``), or ``$()``** because headless permission checks block all compound commands (e.g., ``Get-ChildItem | Select-Object`` is denied). Run single allowlisted commands only: ``git ls-files``, ``Get-ChildItem -Recurse -File -Name``, ``ls -R``, ``dir``, ``git status``, ``git diff``, ``git log``.
+> - **If you ARE Antigravity (``agy``) executing a task:** Never invoke ``agy``. Use your built-in ``read_file``, ``edit_file``, and ``write_file`` tools for all file operations. When calling ``run_command``, **NEVER use pipes (``|``), chains (``&&``, ``;``), redirection (``>``), or ``$()``** because headless permission checks block all compound commands (e.g., ``Get-ChildItem | Select-Object`` is denied). Run single allowlisted commands only: ``git ls-files``, ``git status``, ``git diff``, ``Get-ChildItem -Recurse -File -Name``, ``ls -R``, ``dir``.
 
 ### 1. Dynamic Model Selection (Workload-Based Tiering)
 Never hardcode deprecated model IDs. Select the model dynamically based on task complexity:
