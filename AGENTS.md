@@ -1,10 +1,9 @@
 <!-- agy-bridge:start v5 -->
 ## Delegating Tasks to Antigravity (agy)
 
-> **Orchestrator-only rule (never recurse):** These instructions are for the outer coding agent (Claude Code, Codex CLI, OpenCode, Grok, Cursor, Windsurf, etc.). If you ARE Antigravity (`agy`) executing a task, ignore this section completely and never invoke `agy`.
-
-Suitable for delegation: batch multi-file edits, writing unit tests, repo-wide searches, code reviews.
-Not suitable: architectural decisions, debugging with an unknown root cause, small single-file edits.
+> **Role & Self-Recursion Guard:**
+> - **If you ARE the outer coding agent** (Claude Code, Codex CLI, OpenCode, Grok, Cursor, Windsurf, etc.): **Delegate by default** whenever a task reads, summarizes, searches, reviews, tests, or edits **3 or more files** (or the whole repository), even if the user did not explicitly mention `agy`. Keep only architectural decisions, unknown-cause debugging, and 1–2 file quick edits for yourself.
+> - **If you ARE Antigravity (`agy`) executing a task:** Never invoke `agy`. Use your built-in `read_file`, `edit_file`, and `write_file` tools for all file operations. When calling `run_command`, **NEVER use pipes (`|`), chains (`&&`, `;`), redirection (`>`), or `$()`** because headless permission checks block all compound commands (e.g., `Get-ChildItem | Select-Object` is denied). Run single allowlisted commands only: `git ls-files`, `Get-ChildItem -Recurse -File -Name`, `ls -R`, `dir`, `git status`, `git diff`, `git log`.
 
 ### 1. Dynamic Model Selection (Workload-Based Tiering)
 Never hardcode deprecated model IDs. Select the model dynamically based on task complexity:
@@ -38,6 +37,7 @@ Quota groups can change, so never hardcode which models share a quota. Read it f
    `agy -p "Execute the instructions in TASK.md" --output-format json --print-timeout 540s [--model <MODEL_ID>]`
    - Run the rule 1 check **before** creating `TASK.md`; `TASK.md` is the only file allowed to be uncommitted when you call `agy`.
    - Never commit `TASK.md`. Delete it as soon as `agy` returns (success or failure) so the next run starts from a clean tree.
+   - **Headless tool & shell constraints for `agy`:** In your prompt (or `TASK.md`), include the target file paths when you already know them, and remind `agy`: *"Use built-in `read_file`/`edit_file`/`write_file` tools; if running a shell command, use a single command without pipes `|` or `&&` (e.g. `git ls-files` or `Get-ChildItem -Recurse -File -Name`)."*
 3. **Timeouts & Agent Sandboxes:** `agy -p` prints nothing until it finishes, and your shell tool does **not** kill it when the tool times out: it keeps running and editing files.
    - Foreground calls: always pass `--print-timeout 540s` and set your shell tool timeout (`timeout` in Claude Code / OpenCode, `timeout_ms` in Codex CLI) to `600000`, so `agy` stops itself before the tool gives up.
    - For Tier 3 or anything that may take longer, start it in the background (`run_in_background: true` in Claude Code, or background exec/terminal mode in Codex / other agents) with a `--print-timeout` that fits the task, and poll its output instead of blocking.
