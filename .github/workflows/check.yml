@@ -14,12 +14,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Shell syntax and lint
         run: |
-          bash -n setup.sh
-          shellcheck setup.sh scripts/*.sh
-      - name: CLAUDE.md rules are identical in setup.sh and setup.ps1
+          for f in setup.sh setup-grok.sh scripts/*.sh; do bash -n "$f"; done
+          shellcheck setup.sh setup-grok.sh scripts/*.sh
+      - name: CLAUDE.md rules are in sync with verify scripts
         run: bash scripts/check-rules-sync.sh
       - name: Claude PreToolUse guard hook unit tests
-        run: bash scripts/test-agy-guard.sh
+        run: |
+          bash scripts/test-agy-guard.sh
+          bash scripts/test-grok-guard.sh
       - name: Allow script unit tests (Unix)
         run: bash scripts/test-allow.sh
       - name: PowerShell syntax
@@ -31,8 +33,24 @@ jobs:
             if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error "${f}: $($_.Message)" }; exit 1 }
           }
 
-  # Runs the real setup script and scripts/verify.* on each OS. A fake `agy` on PATH
-  # stands in for the real CLI (no login, no quota, no installer download).
+  # The grok scripts carry fallbacks for Python < 3.11 (no tomllib); macOS's /usr/bin/python3 is 3.9.
+  grok-python:
+    name: grok tests (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10", "3.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Guard, worker, and setup-grok.sh tests
+        run: bash scripts/test-grok-guard.sh
+
+  # Runs the real setup script and scripts/verify.* on each OS. Fake `agy` and `grok`
+  # binaries on PATH stand in for the real CLIs (no login, no quota, no installer download).
   install:
     name: install (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -47,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fake agy (Unix)
+      - name: Fake agy & grok (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -59,7 +77,27 @@ jobs:
             echo '{"status":"SUCCESS","response":"","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"window":"weekly","remaining_fraction":0.99,"reset_time":"x"},{"window":"5h","remaining_fraction":0.5,"reset_time":"x"}]}]}}}'
           fi
           FAKE
-          chmod +x "$bin/agy"
+          cat > "$bin/grok" << 'FAKE'
+          #!/usr/bin/env bash
+          case "${1:-}" in
+            --version|version|-v) echo "grok 1.0.62 (fake) [stable]" ;;
+            models)
+              printf 'You are logged in with grok.com.\n\nDefault model: grok-4.7-build-fast\n\nAvailable models:\n  - grok-4.7\n  * grok-4.7-build-fast (default)\n'
+              ;;
+            inspect)
+              cfg="$PWD/.grok/config.toml"
+              if [ ! -f "$cfg" ]; then
+                cfg="${GROK_HOME:-$HOME/.grok}/config.toml"
+              fi
+              n=0
+              if [ -f "$cfg" ]; then
+                n=$(grep -cE '^\s*"(Write|Edit|Read|Bash)\(' "$cfg" || true)
+              fi
+              printf '  Permissions\n  └ Source: %s (config)\n  └ %d loaded, 0 skipped\n' "$cfg" "$n"
+              ;;
+          esac
+          FAKE
+          chmod +x "$bin/agy" "$bin/grok"
           echo "$bin" >> "$GITHUB_PATH"
 
       - name: Fake agy (Windows)
@@ -113,6 +151,40 @@ jobs:
             printf '%s' "$ok" > "$settings"
             bash "$GITHUB_WORKSPACE/setup.sh"
             bash "$GITHUB_WORKSPACE/scripts/verify.sh"
+          done
+
+          echo "--- grok: fresh install, global legacy migration, coexistence with agy in CLAUDE.md, and idempotent re-run"
+          export GROK_HOME="$RUNNER_TEMP/grokhome"
+          mkdir -p "$GROK_HOME"
+          grok_global_cfg="$GROK_HOME/config.toml"
+          cat > "$grok_global_cfg" << 'LEGACY'
+          [ui]
+          permission_mode = "always-approve"
+
+          # >>> grok-bridge: managed by setup-grok.sh, re-run it to update >>>
+          [permission]
+          allow = [
+            "Write(/tmp/old-project/**)",
+            "Edit(/tmp/old-project/**)",
+          ]
+          # <<< grok-bridge <<<
+          LEGACY
+          proj_grok_cfg="$proj/.grok/config.toml"
+          bash "$GITHUB_WORKSPACE/setup-grok.sh"
+          if grep -q "old-project" "$grok_global_cfg"; then echo "legacy grok-bridge block was not migrated out of $grok_global_cfg"; exit 1; fi
+          grep -q 'permission_mode = "always-approve"' "$grok_global_cfg" || { echo "migration dropped the user's own settings from $grok_global_cfg"; exit 1; }
+          bash "$GITHUB_WORKSPACE/scripts/verify-grok.sh"
+          bash "$GITHUB_WORKSPACE/scripts/verify.sh"
+          bash "$GITHUB_WORKSPACE/setup-grok.sh"
+          bash "$GITHUB_WORKSPACE/scripts/verify-grok.sh"
+
+          echo "--- grok: malformed or conflicting .grok/config.toml must abort, keep a .bak, and stay untouched"
+          for bad in $'[ui\nfoo = 1' $'[permission]\nallow = ["Bash(npm test*)"]' $'permission.deny = ["Bash(x*)"]'; do
+            rm -f "$proj_grok_cfg".bak-*
+            printf '%s' "$bad" > "$proj_grok_cfg"
+            if bash "$GITHUB_WORKSPACE/setup-grok.sh"; then echo "setup-grok.sh accepted: $bad"; exit 1; fi
+            [ "$(cat "$proj_grok_cfg")" = "$bad" ] || { echo ".grok/config.toml changed for: $bad"; exit 1; }
+            ls "$proj_grok_cfg".bak-* > /dev/null || { echo "no .bak for: $bad"; exit 1; }
           done
 
       - name: Fresh install, re-run, and malformed settings (Windows)

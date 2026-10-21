@@ -39,5 +39,25 @@ for path, pat in (("scripts/verify.sh", r'EXPECTED_RULES="(v\d+)"'), ("scripts/v
     found = re.search(pat, open(path, encoding="utf-8").read())
     if not found or found.group(1) != marker:
         sys.exit(f"{path} expects rules {found and found.group(1)} but setup.sh ships {marker}")
-print("OK: rules blocks in setup.sh, setup.ps1, and AGENTS.md are identical, verify scripts expect " + marker + ".")
+
+grok_text = open("setup-grok.sh", encoding="utf-8").read().replace("\r\n", "\n")
+gm = re.search(r"^<!-- grok-bridge:start (v\d+) -->\n.*?^<!-- grok-bridge:end -->", grok_text, re.S | re.M)
+if not gm:
+    sys.exit("grok-bridge rules block not found in setup-grok.sh")
+if "``" in gm.group(0):
+    sys.exit("setup-grok.sh rules block contains doubled backticks")
+gmarker = gm.group(1)
+vfound = re.search(r'EXPECTED_RULES="(v\d+)"', open("scripts/verify-grok.sh", encoding="utf-8").read())
+if not vfound or vfound.group(1) != gmarker:
+    sys.exit(f"scripts/verify-grok.sh expects rules {vfound and vfound.group(1)} but setup-grok.sh ships {gmarker}")
+
+wm = re.search(r"cat > \"\$WORKER_FILE\.tmp\" << 'GROK_WORKER_EOF'\n(.*?)\nGROK_WORKER_EOF", grok_text, re.S)
+if not wm:
+    sys.exit("embedded grok-worker.py not found in setup-grok.sh")
+worker_standalone = open("scripts/grok-worker.py", encoding="utf-8").read().replace("\r\n", "\n").rstrip("\n")
+if wm.group(1).rstrip("\n") != worker_standalone:
+    sys.exit("embedded grok-worker.py in setup-grok.sh differs from scripts/grok-worker.py")
+
+print("OK: rules blocks in setup.sh, setup.ps1, and AGENTS.md are identical, verify scripts expect "
+      + marker + "; grok rules (" + gmarker + ") and grok-worker.py are in sync.")
 PY

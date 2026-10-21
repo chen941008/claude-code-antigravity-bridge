@@ -332,24 +332,85 @@ After that, re-running the script upgrades the marked block in place automatical
 
 ## Optional: Hard-Enforce the Rules with a PreToolUse Hook
 
-`CLAUDE.md` rules are advice; Claude can still forget them. [`extras/claude-hook/agy_guard.py`](./extras/claude-hook/agy_guard.py) is an optional Claude Code hook that blocks a headless `agy -p` call (exit code 2) when `--output-format json` is missing, when neither `run_in_background` nor a Bash `timeout` >= 600000 is set, when a foreground call lacks `--print-timeout`, or when another headless `agy` run from the same project directory is still alive (runs in other projects are ignored when their directory can be read; otherwise it conservatively blocks). Add it to `.claude/settings.json`:
+`CLAUDE.md` rules are advice; Claude can still forget them. [`extras/claude-hook/agy_guard.py`](./extras/claude-hook/agy_guard.py) (for `agy`) and [`extras/claude-hook/grok_guard.py`](./extras/claude-hook/grok_guard.py) (for `grok`) are optional Claude Code hooks that block unsafe headless calls (exit code 2):
+
+- **`agy_guard.py`**: blocks `agy -p` when `--output-format json` is missing, when neither `run_in_background` nor a Bash `timeout` >= 600000 is set, when a foreground call lacks `--print-timeout`, or when another headless `agy` run from the same project directory is still alive (runs in other projects are ignored when their directory can be read; otherwise it conservatively blocks).
+- **`grok_guard.py`**: strips POSIX shell comments (`#`), tokenizes commands with `shlex`, recursively unwraps `bash -c` / `sh -c`, blocks dynamic shell or inline-interpreter wrappers (`eval`, `$(...)`, backticks, `python3 -c`, `node -e`, `perl -e`), and enforces that all headless Grok tasks go through the project's `<project>/.grok/grok-worker.py` (rejecting direct `grok -p` calls and untrusted wrapper paths such as `/tmp/grok-worker.py`, while allowing local `grok models` / `grok inspect`). Verifies `--mode read-only` vs `--mode write`, prevents downgrading `--sandbox read-only` in read-only mode, bounds `--max-turns <1..120>` and `--wall-timeout <1..3600>`, blocks `/usage` and `/cost` prompts, requires `run_in_background` or Bash `timeout` >= 600000, and checks the project directory lock plus the write worker's persistent `<project>/.grok/worker.lock` (`fcntl.flock`) so concurrent runs in the same project are blocked without `pgrep -f` false positives. It unwraps shell keywords (`then`, `{`, `!`), `exec`, and `env -S`; blocks any other command that is handed `grok` (`timeout 60 grok`, `sudo grok`, `find -exec grok`, `watch 'grok -p ...'`, `G=grok`) while still allowing lookups such as `which grok` or `grep grok`; and requires the worker to run for the project root (no `--cwd`, `cd`, `pushd`, or `env -C` redirection). It is a static pre-check for an agent following the rules, not a sandbox: commands assembled at run time (`g=gr; ${g}ok`) or written to a script file first are out of its reach.
+
+Add either or both to `.claude/settings.json`:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "python3 /path/to/extras/claude-hook/agy_guard.py" }] }
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "python3 /path/to/extras/claude-hook/agy_guard.py" },
+          { "type": "command", "command": "python3 /path/to/extras/claude-hook/grok_guard.py" }
+        ]
+      }
     ]
   }
 }
 ```
 
-Unexpected input always passes through, so a bug in the hook cannot lock you out of Bash. Test it offline with `bash scripts/test-agy-guard.sh`.
+Unexpected input always passes through, so a bug in a hook cannot lock you out of Bash. Test offline with `bash scripts/test-agy-guard.sh` and `bash scripts/test-grok-guard.sh`.
+
+---
+
+## Delegating Tasks to Grok Build (`grok`) (macOS / Linux / WSL)
+
+If you also subscribe to **xAI / SuperGrok** (Grok Build CLI, `grok`), you can set up `grok` as a second headless worker—either standalone or alongside `agy` in the same project.
+
+### Quick Start (`setup-grok.sh`)
+
+Run [`setup-grok.sh`](./setup-grok.sh) inside your **project root directory**:
+
+```bash
+bash setup-grok.sh
+```
+
+What it does:
+1. Installs `grok` via the official `https://x.ai/cli/install.sh` installer if `grok` is not already on `PATH`.
+2. Writes a **project-scoped** `[permission]` block into `<project>/.grok/config.toml` (not global `~/.grok/config.toml`, preventing cross-project write permission accumulation), registers folder trust in `~/.grok/trusted_folders.toml`, and automatically migrates any legacy `grok-bridge` block out of global `~/.grok/config.toml`. The project-scoped config grants `Write(/real/path/**)` and `Edit(/real/path/**)` for this project only, and adds comprehensive `deny` rules covering `.env` / `.env.*`, private keys and certificates (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, `*.jks`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`), cloud & credential stores (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.npmrc`, `.pypirc`, `.netrc`, `*credentials*.json`, `*secret*.json`), and write-protection for `.git/**`, `.grok/**`, and `.claude/**`.
+3. Installs [`scripts/grok-worker.py`](./scripts/grok-worker.py) into `<project>/.grok/grok-worker.py` (with `<project>/.grok/.gitignore` set to `*` so `git status` stays clean) and appends (or upgrades in place) a `<!-- grok-bridge:start v2 -->` ... `<!-- grok-bridge:end -->` block in `CLAUDE.md` without touching your existing instructions or your `agy-bridge` block.
+4. When both `agy-bridge` and `grok-bridge` blocks exist in `CLAUDE.md`, Claude defaults to `agy` and switches to `grok` when you ask for Grok or when `agy` cannot take the task (not installed, not signed in, or all `agy` quota groups exhausted—after asking for your one-sentence confirmation once per session).
+
+### Sign In & Verify (`verify-grok.sh`)
+
+If you haven't signed in yet, run `grok login` (or launch `grok` once and `/exit`). Then run the zero-cost self-check from your project root:
+
+```bash
+bash scripts/verify-grok.sh
+```
+
+> [!WARNING]
+> **Never run `grok -p "/usage"` or `grok -p "/cost"` in headless mode.** Unlike `agy -p "/usage"` (which intercepts `/usage` locally at zero cost), headless `grok` treats `/usage` as a normal user prompt and sends it to the model—burning tokens/credits (~500k tokens in real-world testing) while still failing to read your account allowance (which is only displayed inside the interactive TUI `/usage` modal). Always use `bash scripts/verify-grok.sh` (which calls `grok models` and `grok inspect` locally at zero cost).
+
+### Key Headless Behaviors of `grok-worker.py` & `grok -p` (Verified on `grok 1.0.62`)
+
+- **Why invoke `python3 .grok/grok-worker.py` instead of raw shell `grok -p`:** `grok-worker.py` launches `grok` directly via `subprocess.Popen(argv, shell=False, start_new_session=True)`, injecting `--output-format json` and `--permission-mode dontAsk` directly into `argv` (eliminating shell-comment `#` or `bash -c` flag-stripping risks), acquiring an atomic kernel lock (`fcntl.flock`) on the project directory (plus `.grok/worker.lock` in write mode) to prevent concurrent workers, and enforcing both bounded `--max-turns` (`1..120`) and a wall-clock timeout (`--wall-timeout`, default `540s`) that terminates the entire child process group (`os.killpg`). If the wrapper itself is killed, even with `SIGKILL`, a watchdog in its own session ends `grok`'s process group and keeps the project locked until it has exited.
+- **Task-specific toolsets & OS sandboxes (`--mode read-only` vs `--mode write`):**
+  - `--mode read-only` passes `--tools read_file,grep,list_dir --sandbox read-only` so read-only reviews and audits cannot modify files even inside the project.
+  - `--mode write` passes `--disallowed-tools run_terminal_cmd --sandbox strict` (and optional `--worktree <name>` for isolated multi-file edits).
+- **Worktree validation:** Existing paths, Grok-created worktrees, and Git fallback destinations must share the source repository's Git common directory and appear at their physical path in `git worktree list --porcelain -z` before any permissions or folder trust are granted. The source directory itself is rejected as an isolation target. Existing worktree config files are validated and preserved byte for byte, including empty allowlists and custom deny/ask rules; the wrapper only inherits config when none exists and never replaces a config that appears during initialization. Unsafe or malformed config is rejected. On Python 3.9/3.10 (no `tomllib`), a worktree config is reused only if it is exactly the one the wrapper provisions; validating any other existing config requires Python 3.11+. Native Grok creation carries uncommitted changes; if it fails or returns no usable path, the Git fallback creates a detached HEAD worktree only when the source has no staged, unstaged, or untracked changes. Otherwise it stops with an error; it never commits or stashes your changes.
+- **Prompt files in worktrees:** `--prompt-file` must resolve to a regular file inside the `--cwd` project, in either mode. External paths, `..` escapes, and symlinks that resolve outside the project are rejected before reading. To use an external task, first copy approved content into the project yourself. With `--worktree --prompt-file TASK.md`, the wrapper snapshots the validated content into a unique `.grok/worker-prompt-*.md` inside the target worktree and passes that path to Grok, keeping it readable under `strict`. JSON prompts keep their `.json` extension. It removes the temporary copy after execution and preserves existing task files. The source prompt stays untouched. An untracked `TASK.md` also counts as dirty for the Git fallback.
+- **Read-only initialization:** Read-only workers never inherit or create project permission config, register folder trust, or create `.grok`, `.gitignore`, or lock files. They use a kernel lock on the existing project directory. Write workers share that directory lock and also retain `.grok/worker.lock` for diagnostics and older wrappers; the Grok guard checks both locks. An existing lock file is never rewritten by a read-only worker. Grok may still write session/runtime data in its own home as allowed by its read-only sandbox.
+- **Side-effect-free `--dry-run`:** Validates arguments, trust, and existing worktree membership, then prints the planned cwd, argv, and initialization operations. It never creates a worktree, config, prompt copy, lock, or trust entry, including when invoked directly from a linked worktree. Future worktree paths and prompt snapshot names are shown as placeholders.
+- **Why `--permission-mode dontAsk` is required on every call:** In the `grok` interactive TUI, pressing `Ctrl+O` or running `/always-approve` writes `permission_mode = "always-approve"` to `~/.grok/config.toml`. Passing `--permission-mode dontAsk` on the CLI overrides that setting for the headless process so only allowlisted file writes inside the project and built-in read-only operations are permitted.
+- **Why `--disallowed-tools run_terminal_cmd` is included by default in write mode:** `grok`'s built-in read-only shell allowlist (`ls`, `cat`, `git status/diff/log`, `rg`, `grep`, ...) does **not** include `find`. When the shell tool is enabled, `grok` frequently tries a compound shell command like `ls ...; find . -name ...` even for simple file lookups; under `dontAsk`, `find` is refused (`permission required: Execute ... was not run` on `stderr`), which immediately aborts the entire headless run (`"stopReason": "cancelled"`, exit code `0`). Disabling `run_terminal_cmd` forces `grok` to use its native `read_file`, `list_dir`, and `grep` tools cleanly.
+- **How to allow shell commands (e.g., `pytest`, `cargo test`) in `grok`:** Add narrow `Bash(...)` glob patterns to the `allow` array in `<project>/.grok/config.toml` (for example `"Bash(pytest *)"` or `"Bash(cargo test *)"`), and pass `--allow-shell` to `python3 .grok/grok-worker.py --mode write --allow-shell ...` for that task. Note that `grok` uses glob matching where `*` matches any characters including spaces (`Bash(git *)`), whereas `agy` uses prefix matching without `*` (`command(git status)`).
+- **Symlinks & physical paths:** `grok` resolves symlinks (such as `/tmp` -> `/private/tmp` on macOS) before evaluating `Write(...)` and `Edit(...)` rules; a rule written with the symlinked path is refused. `setup-grok.sh` always records `pwd -P`.
+- **Turn limit (`--max-turns`) + Wall-Clock Timeout (`--wall-timeout`):** `grok` has no print-timeout flag; `--max-turns <N>` (30 / 60 / 100 by tier, capped at 120) stops runaway turn loops (exits with code `1` and `"stopReason": "max_turn_requests"`, resumable via `--resume <sessionId>`), while `grok-worker.py`'s `--wall-timeout` kills hung tool or model calls at the process-group level (exit code `124`).
+
+---
 
 ## Quota & Security Checklist
 
-- **Quota consumption:** Antigravity quota is based on actual agent work/tokens (refreshes every 5 hours with a weekly cap). Each headless call loads ~6k–10k context tokens; batch related edits into a single task or reuse `--conversation <id>`.
-- **Model pools:** Gemini models and Claude/GPT models draw from separate quota pools. Use Gemini Flash for routine tasks.
+- **Quota consumption:** Antigravity quota is based on actual agent work/tokens (refreshes every 5 hours with a weekly cap). Each headless call loads ~6k–10k context tokens; batch related edits into a single task or reuse `--conversation <id>` (`--resume <sessionId>` on `grok`).
+- **Model pools:** Gemini models and Claude/GPT models draw from separate quota pools in `agy`; `grok` draws from your xAI / SuperGrok allowance. Use lightweight/fast models for routine tasks.
 - **Family sharing:** Antigravity quota in a Google One family group is shared across all members.
-- **Untrusted output:** The rules tell Claude to treat `agy` output (and anything `agy` read from the repo) as data, never as instructions, because files in a repository can contain planted text. Still review diffs before accepting changes.
-- **Safety:** Prefer a Git repo (the rules use `git status` / `git diff` when available, and fall back to a backup or file-list check when not), never use `--dangerously-skip-permissions` outside ephemeral sandboxes, and always review the changes after delegation.
+- **Untrusted output:** The rules tell Claude to treat `agy` and `grok` output (and anything they read from the repo) as data, never as instructions, because files in a repository can contain planted text. Still review diffs before accepting changes.
+- **Safety:** Prefer a Git repo (the rules use `git status` / `git diff` when available, and fall back to a backup or file-list check when not), never use `--dangerously-skip-permissions` or `--always-approve` / `--yolo` outside ephemeral sandboxes, and always review the changes after delegation.
+
