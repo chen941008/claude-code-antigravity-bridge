@@ -117,7 +117,8 @@ jobs:
 
       - name: Fresh install, re-run, and malformed settings (Windows)
         if: runner.os == 'Windows'
-        shell: ${{ matrix.shell }}
+        # `matrix` is not available in `shell:`; the scripts under test still run in matrix.shell via `& $ps`.
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
           $ps = "${{ matrix.shell }}"
